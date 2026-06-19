@@ -13,8 +13,9 @@ The agent never imports Alpaca or Webull directly — it talks only to
 BrokerPort. Changing BROKER= in .env swaps the broker with no code change.
 """
 from __future__ import annotations
+import asyncio
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime
 
 import pytz
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +26,6 @@ from db.models.paper_trade import PaperTrade, TradeStatus
 
 logger = logging.getLogger(__name__)
 
-_ET = pytz.timezone("America/New_York")
-_MARKET_OPEN  = time(9, 30)
-_MARKET_CLOSE = time(16, 0)
-
 # Only BUY signals trigger a new position
 _ENTRY_ACTIONS = {ActionType.BUY}
 
@@ -37,10 +34,13 @@ _SUPPORTED_CONTRACT_TYPES = {ContractType.STOCK, ContractType.UNKNOWN}
 
 
 def _is_market_open() -> bool:
-    now_et = datetime.now(_ET)
-    if now_et.weekday() >= 5:
+    tz = pytz.timezone(settings.MARKET_TIMEZONE)
+    now = datetime.now(tz)
+    if now.weekday() >= 5:
         return False
-    return _MARKET_OPEN <= now_et.time() < _MARKET_CLOSE
+    return (
+        settings.market_open_time <= now.time() < settings.market_close_time
+    )
 
 
 async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:

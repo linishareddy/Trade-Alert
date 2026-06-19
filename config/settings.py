@@ -1,5 +1,15 @@
 from __future__ import annotations
+from datetime import time
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_hhmm(value: str) -> time:
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid time {value!r}, expected HH:MM")
+    hour, minute = int(parts[0]), int(parts[1])
+    return time(hour, minute)
 
 
 class Settings(BaseSettings):
@@ -35,7 +45,10 @@ class Settings(BaseSettings):
     TAKE_PROFIT_PCT: float = 0.15         # 15% profit target
     STOP_LOSS_PCT: float = 0.10           # 10% stop loss
     DEFAULT_QTY: int = 1                  # shares per signal
-    MARKET_HOURS_ONLY: bool = True        # skip signals outside 9:30–16:00 ET
+    MARKET_HOURS_ONLY: bool = True        # skip signals outside market window
+    MARKET_TIMEZONE: str = "America/New_York"  # US Eastern for NYSE/NASDAQ
+    MARKET_OPEN: str = "09:30"            # regular session open (HH:MM)
+    MARKET_CLOSE: str = "16:00"           # regular session close (HH:MM)
 
     # ── Alpaca ─────────────────────────────────────────────────────────────────
     ALPACA_API_KEY: str = ""
@@ -68,6 +81,14 @@ class Settings(BaseSettings):
     WEBULL_DEFAULT_QTY: int = 1
     WEBULL_ORDER_TYPE: str = "LIMIT"
     WEBULL_MARKET_HOURS_ONLY: bool = True
+
+    @property
+    def market_open_time(self) -> time:
+        return _parse_hhmm(self.MARKET_OPEN)
+
+    @property
+    def market_close_time(self) -> time:
+        return _parse_hhmm(self.MARKET_CLOSE)
 
     @property
     def discord_channel_ids(self) -> list[int]:
