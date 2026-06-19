@@ -1,13 +1,32 @@
+# ── Web framework ─────────────────────────────────────
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
+
+# ── Database ──────────────────────────────────────────
 sqlalchemy[asyncio]>=2.0.0
 greenlet>=3.0.0
 alembic>=1.11.0
 asyncpg>=0.29.0
+
+# ── Discord self-bot ──────────────────────────────────
+discord.py-self
+
+# ── Broker adapters ───────────────────────────────────
+alpaca-py>=0.20.0                  # Alpaca paper + live trading
+webull-openapi-python-sdk          # Webull (used when BROKER=webull)
+
+# ── Market data ───────────────────────────────────────
+yfinance>=0.2.40                   # free intraday bars (default)
+
+# ── AI Parsing ────────────────────────────────────────
+groq>=0.9.0                        # Groq Llama3 fallback parser
+
+# ── WhatsApp notifications ────────────────────────────
+twilio>=9.0.0
+
+# ── Utilities ─────────────────────────────────────────
 rapidfuzz>=3.0.0
 httpx>=0.24.0
-discord.py-self
-webull-openapi-python-sdk
 pytz>=2024.1

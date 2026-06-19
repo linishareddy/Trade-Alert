@@ -1,7 +1,8 @@
 """
-parsing_agent.py
+parsing/__init__.py
 
 Regex-based parsing agent for Discord trading alerts.
+Falls back to Groq LLM when no regex format matches.
 
 Format A — Shorthand options (BTO/STC):
     BTO $SBUX 103c 06/12 @0.55
@@ -20,6 +21,8 @@ Format D — Plain-text stock/options trade:
     BTO SPY 450c @ 1.50
 """
 from __future__ import annotations
+import asyncio
+import json
 import re
 import logging
 from datetime import date, datetime
@@ -314,29 +317,114 @@ def _parse_expiry_yymmdd(s: str) -> date | None:
         return None
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
+# ── Public entry points ───────────────────────────────────────────────────────
 
 def parse(content: str, embeds: list[dict]) -> ParsedSignalDTO | None:
     """
-    Try each format in priority order, return the first match.
-
-    Priority: A → B → C → D (plain-text fallback)
-    Returns None if no format matches.
+    Synchronous regex-only parse. Try each format in priority order.
+    Priority: A → B → C → D
+    Returns None if nothing matches (caller should use parse_async instead).
     """
-    result = (
+    return (
         _parse_format_a(content)
         or _parse_format_b(content)
         or _parse_format_c(content, embeds)
         or _parse_format_d(content)
     )
+
+
+async def parse_async(content: str, embeds: list[dict]) -> ParsedSignalDTO | None:
+    """
+    Async entry point used by ingestion_service.
+    Tries regex first (fast, free). If all fail, falls back to Groq LLM.
+    """
+    result = parse(content, embeds)
+
     if result:
         logger.info(
-            "[ParsingAgent] ✅ format=%s ticker=%s action=%s "
-            "contract=%s strike=%s expiry=%s entry=%s tp=%s sl=%s",
-            result.parse_format, result.ticker, result.action,
-            result.contract_type, result.strike, result.expiry,
-            result.entry_price, result.target_price, result.stop_loss,
+            "[ParsingAgent] ✅ regex format=%s ticker=%s action=%s entry=%s",
+            result.parse_format, result.ticker, result.action, result.entry_price,
         )
-    else:
-        logger.warning("[ParsingAgent] ⚠ No format matched: %r", content[:120])
-    return result
+        return result
+
+    # ── AI fallback ───────────────────────────────────────────────────────────
+    from config.settings import settings
+    if settings.AI_PARSING_ENABLED and settings.GROQ_API_KEY:
+        logger.info("[ParsingAgent] Regex failed — trying Groq AI fallback")
+        result = await _parse_with_ai(content, embeds)
+        if result:
+            logger.info(
+                "[ParsingAgent] ✅ AI format=%s ticker=%s action=%s entry=%s",
+                result.parse_format, result.ticker, result.action, result.entry_price,
+            )
+            return result
+
+    logger.warning("[ParsingAgent] ⚠ No format matched (regex + AI): %r", content[:120])
+    return None
+
+
+async def _parse_with_ai(content: str, embeds: list[dict]) -> ParsedSignalDTO | None:
+    """Use Groq (Llama 3) to extract a structured signal from any message format."""
+    from groq import Groq
+    from config.settings import settings
+
+    embed_text = ""
+    if embeds:
+        embed_text = f"\nEmbeds: {json.dumps(embeds[:1], default=str)[:400]}"
+
+    prompt = f"""You extract trading signals from Discord messages. Return JSON only, no explanation.
+
+Message: {content[:600]}{embed_text}
+
+Return EXACTLY this JSON (use null for unknown fields):
+{{
+  "action": "BUY|SELL|EXIT|SL_HIT|SCALE_IN|SCALE_OUT|HOLD|UPDATE",
+  "ticker": "AAPL",
+  "contract_type": "STOCK|CALL|PUT|UNKNOWN",
+  "strike": null,
+  "expiry": null,
+  "entry_price": 150.00,
+  "target_price": null,
+  "stop_loss": null
+}}
+
+If this message is NOT a trading signal, return: {{"action": null}}"""
+
+    try:
+        client = Groq(api_key=settings.GROQ_API_KEY)
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            max_tokens=250,
+            response_format={"type": "json_object"},
+        )
+
+        raw = response.choices[0].message.content.strip()
+        data = json.loads(raw)
+
+        if not data.get("action"):
+            return None
+
+        action = data["action"].upper()
+        ticker = (data.get("ticker") or "").upper().strip()
+        if not ticker:
+            return None
+
+        return ParsedSignalDTO(
+            action=action,
+            ticker=ticker,
+            contract_type=data.get("contract_type", "UNKNOWN") or "UNKNOWN",
+            strike=float(data["strike"]) if data.get("strike") else None,
+            expiry=None,  # date parsing from AI string is fragile — leave for future
+            entry_price=float(data["entry_price"]) if data.get("entry_price") else None,
+            target_price=float(data["target_price"]) if data.get("target_price") else None,
+            stop_loss=float(data["stop_loss"]) if data.get("stop_loss") else None,
+            is_followup=action in _FOLLOWUP_ACTIONS,
+            parse_format="AI",
+        )
+
+    except Exception as exc:
+        logger.warning("[ParsingAgent] Groq AI parse failed: %s", exc)
+        return None

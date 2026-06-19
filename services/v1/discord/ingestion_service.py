@@ -4,10 +4,10 @@ ingestion_service.py
 Orchestrates the full ingest pipeline:
 1. Deduplicate — skip already-seen message_ids
 2. Save raw alert to DB (raw_alerts table)
-3. Parse via ParsingAgent (regex, no LLM)
+3. Parse via ParsingAgent (regex first, Groq AI fallback)
 4. Match follow-up messages to their parent ParsedSignal
 5. Persist ParsedSignal to parsed_signals table
-6. Auto-execute via Webull (if WEBULL_EXECUTION_ENABLED=true)
+6. Auto-execute via BrokerPort (if EXECUTION_ENABLED=true)
 """
 from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,6 @@ from schemas.v1.ingest import RawAlertIn
 import agents.parsing as parsing_agent
 
 
-# Actions that represent a follow-up on an existing open signal
 _FOLLOWUP_ACTIONS = {
     ActionType.EXIT,
     ActionType.SL_HIT,
@@ -30,7 +29,6 @@ _FOLLOWUP_ACTIONS = {
     ActionType.UPDATE,
 }
 
-# Status transitions triggered by follow-up actions
 _STATUS_ON_ACTION: dict[ActionType, SignalStatus] = {
     ActionType.EXIT: SignalStatus.CLOSED,
     ActionType.SL_HIT: SignalStatus.CLOSED,
@@ -42,7 +40,6 @@ _STATUS_ON_ACTION: dict[ActionType, SignalStatus] = {
 async def _find_parent(
     db: AsyncSession, ticker: str, lookback_hours: int = 72
 ) -> ParsedSignal | None:
-    """Return the most recent OPEN or PARTIAL ParsedSignal for this ticker."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     result = await db.execute(
         select(ParsedSignal).where(
@@ -69,7 +66,7 @@ async def ingest_alert(
     raw = existing.scalar_one_or_none()
 
     if raw and not alert.is_edit:
-        return False, None  # Already processed, skip
+        return False, None
 
     if raw and alert.is_edit:
         raw.content = alert.content
@@ -91,10 +88,10 @@ async def ingest_alert(
         await db.commit()
         await db.refresh(raw)
 
-    # ── 3. Parse via ParsingAgent ────────────────────────────
-    dto = parsing_agent.parse(alert.content, alert.embeds)
+    # ── 3. Parse via ParsingAgent (regex + AI fallback) ──────
+    dto = await parsing_agent.parse_async(alert.content, alert.embeds)
     if not dto:
-        return True, None  # Saved to raw_alerts but no recognised signal format
+        return True, None
 
     # ── 4. Match follow-ups to parent ────────────────────────
     parent_id: str | None = None
@@ -129,7 +126,7 @@ async def ingest_alert(
     await db.commit()
     await db.refresh(signal)
 
-    # ── 6. Auto-execute via Webull ───────────────────────────
+    # ── 6. Auto-execute via BrokerPort ───────────────────────
     import agents.execution as execution_agent
     await execution_agent.execute(signal, db)
 
