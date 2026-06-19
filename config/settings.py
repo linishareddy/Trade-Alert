@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # ── Trade rules (apply to ALL brokers) ────────────────────────────────────
     EXECUTION_ENABLED: bool = False       # master kill-switch
+    EMA_VWAP_ENABLED: bool = True         # set False to bypass EMA/VWAP gate
     TAKE_PROFIT_PCT: float = 0.15         # 15% profit target
     STOP_LOSS_PCT: float = 0.10           # 10% stop loss
     DEFAULT_QTY: int = 1                  # shares per signal
@@ -59,9 +60,16 @@ class Settings(BaseSettings):
     # Options: "yfinance" | "alpaca"
     MARKET_DATA_PROVIDER: str = "yfinance"
 
+    # ── Validation parameters ──────────────────────────────────────────────────
+    EMA_PERIODS: str = "9,13,21"          # comma-separated EMA periods
+    BAR_LOOKBACK: int = 50                 # number of 1-min bars fetched
+    BAR_MINUTES: int = 1                   # bar resolution in minutes
+    SUPPORTED_CONTRACTS: str = "STOCK,UNKNOWN"
+
     # ── AI Parsing (Groq fallback) ─────────────────────────────────────────────
     GROQ_API_KEY: str = ""
     AI_PARSING_ENABLED: bool = True
+    AI_MODEL: str = "llama-3.3-70b-versatile"
 
     # ── WhatsApp Notifications (Twilio) ───────────────────────────────────────
     WHATSAPP_NOTIFICATIONS_ENABLED: bool = False
@@ -75,6 +83,11 @@ class Settings(BaseSettings):
     WEBULL_APP_SECRET: str = ""
     WEBULL_ACCOUNT_ID: str = ""
     WEBULL_ENDPOINT: str = "us-openapi-alb.uat.webullbroker.com"
+
+    # ── Auth / JWT ────────────────────────────────────────────────────────────
+    JWT_SECRET_KEY: str = "change-me-in-production-use-secrets-token-urlsafe"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
     # Legacy fields (kept so existing .env files don't break)
     WEBULL_EXECUTION_ENABLED: bool = False

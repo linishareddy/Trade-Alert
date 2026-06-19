@@ -8,8 +8,23 @@ import asyncio
 import random
 import discord
 
-from config.settings import settings
 from agents.discord.harness.client import post_alert
+
+_reconnect_requested = False
+
+
+def request_discord_reconnect() -> None:
+    """Signal the running Discord client to reconnect with fresh credentials."""
+    global _reconnect_requested
+    _reconnect_requested = True
+
+
+def _discord_channel_ids() -> list[int]:
+    from services.v1.config.runtime_settings import runtime
+    raw = str(runtime.get("discord_channels") or "")
+    if not raw:
+        return []
+    return [int(c.strip()) for c in raw.split(",") if c.strip()]
 
 
 class TradingBot(discord.Client):
@@ -18,14 +33,15 @@ class TradingBot(discord.Client):
         super().__init__(
             chunk_guilds_at_startup=False,
         )
-        self.target_channel_ids: list[int] = settings.discord_channel_ids
+
+    @property
+    def target_channel_ids(self) -> list[int]:
+        return _discord_channel_ids()
 
     async def on_ready(self) -> None:
         print(f"[DiscordAgent] ✅ Logged in as {self.user} (ID: {self.user.id})")
         print(f"[DiscordAgent] Watching channels: {self.target_channel_ids}")
 
-        # In order to receive live MESSAGE_CREATE events as a user account
-        # without "Read Message History" permission, we MUST subscribe to the guild.
         for channel_id in self.target_channel_ids:
             channel = self.get_channel(channel_id)
             if channel:
@@ -85,17 +101,47 @@ class TradingBot(discord.Client):
         print(f"[DiscordAgent] {status} | {message.id[-6:]} | {message.author} | {preview}")
 
 
+async def _watch_reconnect(bot: discord.Client) -> None:
+    global _reconnect_requested
+    while not _reconnect_requested:
+        await asyncio.sleep(0.5)
+    print("[DiscordAgent] Credentials changed — reconnecting...")
+    await bot.close()
+
+
 async def run_discord_agent() -> None:
-    if not getattr(settings, "DISCORD_USER_TOKEN", None):
-        print("[DiscordAgent] ❌ DISCORD_USER_TOKEN not set")
-        return
+    from services.v1.config.runtime_settings import runtime
 
-    bot = TradingBot()
+    while True:
+        token = str(runtime.get("discord_token") or "").strip()
+        if not token:
+            print("[DiscordAgent] ❌ DISCORD_USER_TOKEN not set — rechecking in 30s")
+            await asyncio.sleep(30)
+            continue
 
-    try:
-        print("[DiscordAgent] Starting self-bot...")
-        await bot.start(settings.DISCORD_USER_TOKEN)
-    except discord.LoginFailure:
-        print("[DiscordAgent] ❌ Invalid or expired token. Get a fresh one.")
-    except Exception as e:
-        print(f"[DiscordAgent] Crash: {e}")
+        bot = TradingBot()
+        watcher = asyncio.create_task(_watch_reconnect(bot))
+
+        try:
+            print("[DiscordAgent] Starting self-bot...")
+            await bot.start(token)
+        except discord.LoginFailure:
+            print("[DiscordAgent] ❌ Invalid or expired token. Get a fresh one.")
+            await asyncio.sleep(30)
+        except Exception as e:
+            print(f"[DiscordAgent] Crash: {e}")
+            await asyncio.sleep(5)
+        finally:
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
+            if not bot.is_closed():
+                await bot.close()
+
+        if _reconnect_requested:
+            _reconnect_requested = False
+            await asyncio.sleep(2)
+            continue
+        break

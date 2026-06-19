@@ -1,6 +1,6 @@
 """DB access for PaperTrade records."""
 from __future__ import annotations
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.paper_trade import PaperTrade, TradeStatus
@@ -37,15 +37,11 @@ async def get_summary(db: AsyncSession) -> dict:
     result = await db.execute(
         select(
             func.count(PaperTrade.id).label("total"),
-            func.sum(
-                func.cast(PaperTrade.status == TradeStatus.OPEN, func.Integer)
-            ).label("open"),
-            func.sum(
-                func.cast(PaperTrade.status == TradeStatus.CLOSED, func.Integer)
-            ).label("closed"),
+            func.count(case((PaperTrade.status == TradeStatus.OPEN, 1))).label("open"),
+            func.count(case((PaperTrade.status == TradeStatus.CLOSED, 1))).label("closed"),
             func.avg(PaperTrade.pnl_pct).label("avg_pnl_pct"),
             func.sum(PaperTrade.pnl_dollars).label("total_pnl_dollars"),
-        )
+        ).select_from(PaperTrade)
     )
     row = result.one()
     return {

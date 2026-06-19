@@ -20,9 +20,10 @@ def get_broker() -> BrokerPort:
     match settings.BROKER.lower():
         case "alpaca":
             from .alpaca_broker import AlpacaBroker
+            from services.v1.config.runtime_settings import runtime
             _instance = AlpacaBroker(
-                api_key=settings.ALPACA_API_KEY,
-                api_secret=settings.ALPACA_API_SECRET,
+                api_key=str(runtime.get("alpaca_key") or ""),
+                api_secret=str(runtime.get("alpaca_secret") or ""),
                 paper=settings.ALPACA_PAPER,
             )
         case "webull":

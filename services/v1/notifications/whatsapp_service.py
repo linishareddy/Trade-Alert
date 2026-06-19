@@ -25,18 +25,18 @@ _WA = "whatsapp:"
 
 def _client():
     from twilio.rest import Client
-    from config.settings import settings
-    return Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    from services.v1.config.runtime_settings import runtime
+    return Client(runtime.get("twilio_sid"), runtime.get("twilio_token"))
 
 
 def _enabled() -> bool:
-    from config.settings import settings
+    from services.v1.config.runtime_settings import runtime
     ok = (
-        settings.WHATSAPP_NOTIFICATIONS_ENABLED
-        and bool(settings.TWILIO_ACCOUNT_SID)
-        and bool(settings.TWILIO_AUTH_TOKEN)
-        and bool(settings.TWILIO_WHATSAPP_FROM)
-        and bool(settings.WHATSAPP_TO)
+        runtime.get("whatsapp_enabled")
+        and bool(runtime.get("twilio_sid"))
+        and bool(runtime.get("twilio_token"))
+        and bool(runtime.get("twilio_from"))
+        and bool(runtime.get("whatsapp_to"))
     )
     return ok
 
@@ -50,13 +50,13 @@ async def _send(body: str) -> bool:
         logger.debug("[WhatsApp] Notifications disabled or not configured.")
         return False
 
-    from config.settings import settings
+    from services.v1.config.runtime_settings import runtime
 
     try:
         msg = await asyncio.to_thread(
             _client().messages.create,
-            from_=f"{_WA}{settings.TWILIO_WHATSAPP_FROM}",
-            to=f"{_WA}{settings.WHATSAPP_TO}",
+            from_=f"{_WA}{runtime.get('twilio_from')}",
+            to=f"{_WA}{runtime.get('whatsapp_to')}",
             body=body,
         )
         logger.info("[WhatsApp] ✅ Sent — SID=%s", msg.sid)
@@ -78,17 +78,14 @@ async def notify_signal_received(
     """Sent as soon as a Discord signal is parsed successfully."""
     entry_str = f"${entry_price:.2f}" if entry_price else "market"
     sl_str    = f"${stop_loss:.2f}"   if stop_loss   else "—"
-    fmt_label = "AI" if parse_format == "AI" else f"Format {parse_format}"
 
     body = (
-        f"📨 New Signal Detected\n"
+        f"📨 Signal Received\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Ticker:  {ticker}\n"
         f"Action:  {action}\n"
         f"Entry:   {entry_str}\n"
-        f"SL:      {sl_str}\n"
-        f"Parser:  {fmt_label}\n"
-        f"Checking EMA/VWAP..."
+        f"SL:      {sl_str}"
     )
     await _send(body)
 
@@ -184,6 +181,12 @@ async def notify_sl_hit(
         f"P&L:    {pnl_pct:.1f}% | -${abs(pnl_dollars):.2f}\n"
         f"ID: {trade_id[:8]}"
     )
+    await _send(body)
+
+
+async def notify_discord_message(content: str) -> None:
+    """Forward raw Discord message text to WhatsApp."""
+    body = f"📢 Discord Alert\n━━━━━━━━━━━━━━━━━━━━\n{content}"
     await _send(body)
 
 

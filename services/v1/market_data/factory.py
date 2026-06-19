@@ -21,9 +21,10 @@ def get_market_data() -> MarketDataPort:
             _instance = YFinanceData()
         case "alpaca":
             from .alpaca_data_adapter import AlpacaData
+            from services.v1.config.runtime_settings import runtime
             _instance = AlpacaData(
-                api_key=settings.ALPACA_API_KEY,
-                api_secret=settings.ALPACA_API_SECRET,
+                api_key=str(runtime.get("alpaca_key") or ""),
+                api_secret=str(runtime.get("alpaca_secret") or ""),
             )
         case other:
             raise ValueError(

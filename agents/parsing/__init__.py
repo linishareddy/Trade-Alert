@@ -348,10 +348,11 @@ async def parse_async(content: str, embeds: list[dict]) -> ParsedSignalDTO | Non
         return result
 
     # ── AI fallback ───────────────────────────────────────────────────────────
-    from config.settings import settings
-    if settings.AI_PARSING_ENABLED and settings.GROQ_API_KEY:
+    from services.v1.config.runtime_settings import runtime
+    groq_key = str(runtime.get("groq_key") or "").strip()
+    if runtime.get("ai_parsing_enabled") and groq_key:
         logger.info("[ParsingAgent] Regex failed — trying Groq AI fallback")
-        result = await _parse_with_ai(content, embeds)
+        result = await _parse_with_ai(content, embeds, groq_key)
         if result:
             logger.info(
                 "[ParsingAgent] ✅ AI format=%s ticker=%s action=%s entry=%s",
@@ -363,10 +364,10 @@ async def parse_async(content: str, embeds: list[dict]) -> ParsedSignalDTO | Non
     return None
 
 
-async def _parse_with_ai(content: str, embeds: list[dict]) -> ParsedSignalDTO | None:
+async def _parse_with_ai(content: str, embeds: list[dict], api_key: str) -> ParsedSignalDTO | None:
     """Use Groq (Llama 3) to extract a structured signal from any message format."""
     from groq import Groq
-    from config.settings import settings
+    from services.v1.config.runtime_settings import runtime
 
     embed_text = ""
     if embeds:
@@ -391,11 +392,11 @@ Return EXACTLY this JSON (use null for unknown fields):
 If this message is NOT a trading signal, return: {{"action": null}}"""
 
     try:
-        client = Groq(api_key=settings.GROQ_API_KEY)
+        client = Groq(api_key=api_key)
         response = await asyncio.to_thread(
             client.chat.completions.create,
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
+            model=str(runtime.get("ai_model") or "llama-3.3-70b-versatile"),
             temperature=0,
             max_tokens=250,
             response_format={"type": "json_object"},

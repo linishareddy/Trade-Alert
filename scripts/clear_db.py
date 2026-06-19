@@ -1,132 +1,109 @@
+#!/usr/bin/env python3
 """
-clear_db.py
+clear_db.py  —  Wipe ALL rows from every table in the Trade-Alert database.
 
-Clears ALL data from every table in the Trade-Alert database.
-Tables are discovered dynamically from the DB, so the script works
-even if some migrations haven't been run yet.
+Usage (from the Trade-Alert/ directory with venv active):
 
-Run from the backend/ directory:
-    python scripts/clear_db.py
+    python scripts/clear_db.py          # shows counts, prompts YES to confirm
+    python scripts/clear_db.py --yes    # skip prompt (for scripts/CI)
 
-Skip the confirmation prompt (CI/scripts):
-    python scripts/clear_db.py --yes
+Tables are truncated with CASCADE, so FK order doesn't matter.
+The alembic_version table is never touched.
 """
-
 import asyncio
-import sys
 import os
+import sys
 
-# ── Make sure backend/ is on the path so imports resolve ───────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import text
 from db.session import engine
 
-RED    = "\033[91m"
-YELLOW = "\033[93m"
-GREEN  = "\033[92m"
-CYAN   = "\033[96m"
-RESET  = "\033[0m"
-BOLD   = "\033[1m"
-
-# Preferred truncation order (children before parents) for any tables that exist.
-# Tables NOT in this list are truncated last, alphabetically.
-PREFERRED_ORDER = [
-    "parsed_signals",
-    "signals",
-    "raw_alerts",
-]
+# ── ANSI colours ─────────────────────────────────────────────────────────────
+R = "\033[91m"; Y = "\033[93m"; G = "\033[92m"; C = "\033[96m"
+B = "\033[1m";  Z = "\033[0m"
 
 
-async def get_existing_tables(conn) -> list[str]:
-    """Return all user-created tables that currently exist in the DB."""
-    result = await conn.execute(text(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
-    ))
-    all_tables = [row[0] for row in result.fetchall()]
-
-    # Sort: preferred order first, then any others alphabetically
-    ordered = [t for t in PREFERRED_ORDER if t in all_tables]
-    extras  = sorted(t for t in all_tables if t not in PREFERRED_ORDER
-                     and t != "alembic_version")  # skip migration tracking table
-    return ordered + extras
-
-
-async def get_row_counts(conn, tables: list[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for table in tables:
-        result = await conn.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
-        counts[table] = result.scalar()
-    return counts
-
-
-async def clear_all_tables(skip_confirm: bool = False) -> None:
+async def run(skip_confirm: bool) -> None:
     async with engine.connect() as conn:
-        print(f"\n{CYAN}{BOLD}Trade-Alert — Database Cleaner{RESET}")
-        print("─" * 40)
 
-        # ── Discover tables ─────────────────────────────────────────────────────
-        tables = await get_existing_tables(conn)
+        # ── 1. Discover all user tables (skip alembic_version) ────────────────
+        rows = await conn.execute(text(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = 'public' AND tablename != 'alembic_version' "
+            "ORDER BY tablename"
+        ))
+        tables = [r[0] for r in rows.fetchall()]
 
         if not tables:
-            print(f"{YELLOW}No tables found in the database. "
-                  f"Have migrations been run?{RESET}\n")
+            print(f"\n{Y}No tables found — have migrations been run?{Z}\n")
             return
 
-        # ── Show current row counts ─────────────────────────────────────────────
-        counts = await get_row_counts(conn, tables)
-        total_rows = sum(counts.values())
+        # ── 2. Count rows ─────────────────────────────────────────────────────
+        counts: dict[str, int] = {}
+        for t in tables:
+            res = await conn.execute(text(f'SELECT COUNT(*) FROM "{t}"'))
+            counts[t] = res.scalar()
 
-        print(f"{'Table':<22} {'Rows':>8}")
-        print("─" * 32)
-        for table, count in counts.items():
-            colour = RED if count > 0 else GREEN
-            print(f"  {table:<20} {colour}{count:>8}{RESET}")
-        print("─" * 32)
-        print(f"  {'TOTAL':<20} {YELLOW}{total_rows:>8}{RESET}\n")
+        total = sum(counts.values())
 
-        if total_rows == 0:
-            print(f"{GREEN}✓ All tables are already empty. Nothing to do.{RESET}\n")
+        # ── 3. Print summary ─────────────────────────────────────────────────
+        print(f"\n{C}{B}Trade-Alert — Database Cleaner{Z}")
+        print("─" * 38)
+        print(f"  {'Table':<22} {'Rows':>6}")
+        print("  " + "─" * 30)
+        for t, n in counts.items():
+            colour = R if n > 0 else G
+            print(f"  {t:<22} {colour}{n:>6}{Z}")
+        print("  " + "─" * 30)
+        print(f"  {'TOTAL':<22} {Y}{total:>6}{Z}\n")
+
+        if total == 0:
+            print(f"{G}✓ Already empty — nothing to do.{Z}\n")
             return
 
-        # ── Confirmation prompt ─────────────────────────────────────────────────
+        # ── 4. Confirm ────────────────────────────────────────────────────────
         if not skip_confirm:
-            print(f"{RED}{BOLD}⚠  WARNING: This will permanently delete ALL data above!{RESET}")
-            answer = input("  Type  YES  to continue: ").strip()
-            if answer != "YES":
-                print(f"\n{YELLOW}Aborted. No data was deleted.{RESET}\n")
+            print(f"{R}{B}⚠  This will permanently delete ALL data shown above.{Z}")
+            ans = input("  Type  YES  to continue (anything else aborts): ").strip()
+            if ans != "YES":
+                print(f"\n{Y}Aborted — no data deleted.{Z}\n")
                 return
 
-        # ── Truncate ────────────────────────────────────────────────────────────
-        print(f"\n{YELLOW}Truncating tables…{RESET}")
-        async with conn.begin():
-            for table in tables:
-                await conn.execute(
-                    text(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE')
-                )
-                print(f"  {GREEN}✓{RESET}  {table}")
+        # ── 5. Truncate (CASCADE handles all FK constraints) ─────────────────
+        # Commit the read transaction first so we can start a fresh write txn.
+        await conn.commit()
 
-        # ── Verify ──────────────────────────────────────────────────────────────
-        after_counts = await get_row_counts(conn, tables)
-        all_clear = all(v == 0 for v in after_counts.values())
+        print(f"\n{Y}Clearing tables…{Z}")
+        for t in tables:
+            await conn.execute(
+                text(f'TRUNCATE TABLE "{t}" RESTART IDENTITY CASCADE')
+            )
+            print(f"  {G}✓{Z}  {t}  ({counts[t]} rows deleted)")
+        await conn.commit()
 
-        if all_clear:
-            print(f"\n{GREEN}{BOLD}✓ All tables cleared successfully.{RESET}\n")
+        # ── 6. Verify ─────────────────────────────────────────────────────────
+        remaining: dict[str, int] = {}
+        for t in tables:
+            res = await conn.execute(text(f'SELECT COUNT(*) FROM "{t}"'))
+            remaining[t] = res.scalar()
+        await conn.commit()
+
+        leftovers = {t: n for t, n in remaining.items() if n > 0}
+        if leftovers:
+            print(f"\n{R}Some tables still have rows:{Z}")
+            for t, n in leftovers.items():
+                print(f"  {R}✗  {t}: {n} rows{Z}")
         else:
-            print(f"\n{RED}Some tables still have rows — check for errors above.{RESET}")
-            for table, count in after_counts.items():
-                if count:
-                    print(f"  {RED}✗  {table}: {count} rows remaining{RESET}")
+            print(f"\n{G}{B}✅  All tables cleared successfully.{Z}\n")
 
 
 def main() -> None:
-    skip_confirm = "--yes" in sys.argv or "-y" in sys.argv
+    skip = "--yes" in sys.argv or "-y" in sys.argv
     try:
-        asyncio.run(clear_all_tables(skip_confirm=skip_confirm))
+        asyncio.run(run(skip_confirm=skip))
     except KeyboardInterrupt:
-        print(f"\n{YELLOW}Interrupted. No data was deleted.{RESET}\n")
-    finally:
-        asyncio.run(engine.dispose())
+        print(f"\n{Y}Interrupted — no data deleted.{Z}\n")
 
 
 if __name__ == "__main__":

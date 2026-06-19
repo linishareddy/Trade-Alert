@@ -30,3 +30,8 @@ twilio>=9.0.0
 rapidfuzz>=3.0.0
 httpx>=0.24.0
 pytz>=2024.1
+
+# ── Auth ──────────────────────────────────────────────
+PyJWT>=2.8.0
+bcrypt>=4.0.0
+email-validator>=2.0.0

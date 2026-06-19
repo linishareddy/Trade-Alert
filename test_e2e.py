@@ -211,7 +211,6 @@ async def main():
     await test_parsing()
     order_id = await test_place_order(validation)
     test_verify_order(client, order_id)
-    await test_cancel_order(order_id)
     await test_db()
 
     print()

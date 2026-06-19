@@ -21,6 +21,7 @@ import pytz
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
+from services.v1.config.runtime_settings import runtime
 from db.models.parsed_signal import ParsedSignal, ActionType, ContractType
 from db.models.paper_trade import PaperTrade, TradeStatus
 
@@ -50,7 +51,7 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
     """
 
     # ── Guard: kill-switch ───────────────────────────────────
-    if not settings.EXECUTION_ENABLED:
+    if not runtime.get("execution_enabled"):
         logger.debug("[ExecutionAgent] Disabled (EXECUTION_ENABLED=false). Skipping.")
         return None
 
@@ -68,13 +69,13 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
         return None
 
     # ── Guard: market hours ──────────────────────────────────
-    if settings.MARKET_HOURS_ONLY and not _is_market_open():
+    if runtime.get("market_hours_only") and not _is_market_open():
         logger.warning("[ExecutionAgent] Market closed. Skipping %s.", signal.ticker)
         return None
 
     # ── Step 1: Notify signal received ───────────────────────
     from services.v1.notifications.whatsapp_service import (
-        notify_signal_received, notify_trade_opened, notify_trade_skipped,
+        notify_signal_received, notify_trade_opened,
     )
     asyncio.create_task(notify_signal_received(
         ticker=signal.ticker,
@@ -85,34 +86,45 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
     ))
 
     # ── Step 2: EMA/VWAP validation ──────────────────────────
-    from services.v1.validation.ema_vwap_validator import validate
-    validation = await validate(signal.ticker)
+    from services.v1.validation.ema_vwap_validator import validate, ValidationResult
+    from services.v1.market_data.factory import get_market_data
 
-    if not validation.passed:
-        logger.info(
-            "[ExecutionAgent] Validation FAILED for %s — %s",
-            signal.ticker, validation.reason,
+    if runtime.get("ema_vwap_enabled"):
+        validation = await validate(signal.ticker)
+        if not validation.passed:
+            logger.info(
+                "[ExecutionAgent] Validation FAILED for %s — %s",
+                signal.ticker, validation.reason,
+            )
+            await _save_skipped_trade(db, signal, validation)
+            return None
+    else:
+        # Validation bypassed — fetch live price only
+        md = get_market_data()
+        current_price = await md.get_current_price(signal.ticker)
+        validation = ValidationResult(
+            passed=True,
+            current_price=current_price,
+            ema9=0.0, ema13=0.0, ema21=0.0, vwap=0.0,
+            reason="EMA/VWAP validation disabled (EMA_VWAP_ENABLED=false)",
         )
-        await _save_skipped_trade(db, signal, validation)
-        # Notify: signal skipped
-        asyncio.create_task(notify_trade_skipped(
-            ticker=signal.ticker,
-            current_price=validation.current_price,
-            reason=validation.reason,
-        ))
-        return None
+        logger.info("[ExecutionAgent] EMA/VWAP gate bypassed for %s @ %.2f", signal.ticker, current_price)
 
     # ── Step 3: Place bracket order ──────────────────────────
     from services.v1.broker.factory import get_broker
     from services.v1.broker.models import BracketOrderRequest
 
+    tp_pct = runtime.get("take_profit_pct")
+    sl_pct = runtime.get("stop_loss_pct")
+    qty    = runtime.get("default_qty")
+
     broker = get_broker()
     req = BracketOrderRequest(
         symbol=signal.ticker,
-        qty=settings.DEFAULT_QTY,
+        qty=qty,
         side="buy",
-        take_profit_pct=settings.TAKE_PROFIT_PCT,
-        stop_loss_pct=settings.STOP_LOSS_PCT,
+        take_profit_pct=tp_pct,
+        stop_loss_pct=sl_pct,
         entry_price=validation.current_price,
     )
 
@@ -123,15 +135,15 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
         return None
 
     # ── Step 4: Persist PaperTrade ───────────────────────────
-    tp_price = round(validation.current_price * (1 + settings.TAKE_PROFIT_PCT), 2)
-    sl_price = round(validation.current_price * (1 - settings.STOP_LOSS_PCT), 2)
+    tp_price = round(validation.current_price * (1 + tp_pct), 2)
+    sl_price = round(validation.current_price * (1 - sl_pct), 2)
 
     trade = PaperTrade(
         parsed_signal_id=signal.id,
         broker=settings.BROKER,
         broker_order_id=result.broker_order_id or None,
         symbol=signal.ticker,
-        qty=settings.DEFAULT_QTY,
+        qty=qty,
         entry_price=validation.current_price,
         take_profit_price=tp_price,
         stop_loss_price=sl_price,
@@ -149,7 +161,7 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
 
     logger.info(
         "[ExecutionAgent] ✅ Trade opened — %s %s x%d @ %.2f | TP=%.2f SL=%.2f | order=%s",
-        settings.BROKER.upper(), signal.ticker, settings.DEFAULT_QTY,
+        settings.BROKER.upper(), signal.ticker, qty,
         validation.current_price, tp_price, sl_price,
         result.broker_order_id,
     )
@@ -157,12 +169,12 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
     # ── Step 5: Notify trade opened ──────────────────────────
     asyncio.create_task(notify_trade_opened(
         ticker=signal.ticker,
-        qty=settings.DEFAULT_QTY,
+        qty=qty,
         entry_price=validation.current_price,
         tp_price=tp_price,
         sl_price=sl_price,
-        tp_pct=settings.TAKE_PROFIT_PCT,
-        sl_pct=settings.STOP_LOSS_PCT,
+        tp_pct=tp_pct,
+        sl_pct=sl_pct,
         broker=settings.BROKER,
         ema9=validation.ema9,
         ema13=validation.ema13,

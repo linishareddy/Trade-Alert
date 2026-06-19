@@ -7,18 +7,22 @@ Orchestrates the full ingest pipeline:
 3. Parse via ParsingAgent (regex first, Groq AI fallback)
 4. Match follow-up messages to their parent ParsedSignal
 5. Persist ParsedSignal to parsed_signals table
-6. Auto-execute via BrokerPort (if EXECUTION_ENABLED=true)
+6. Auto-execute via ExecutionAgent (if EXECUTION_ENABLED=true)
 """
 from __future__ import annotations
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+import logging
 from datetime import datetime, timezone, timedelta
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from db.models.raw_alert import RawAlert
-from db.models.parsed_signal import ParsedSignal, SignalStatus, ActionType
+from db.models.parsed_signal import ParsedSignal, SignalStatus, ActionType, ContractType
 from schemas.v1.ingest import RawAlertIn
 import agents.parsing as parsing_agent
+import agents.execution as execution_agent
 
+logger = logging.getLogger(__name__)
 
 _FOLLOWUP_ACTIONS = {
     ActionType.EXIT,
@@ -63,71 +67,69 @@ async def ingest_alert(
     existing = await db.execute(
         select(RawAlert).where(RawAlert.message_id == alert.message_id)
     )
-    raw = existing.scalar_one_or_none()
-
-    if raw and not alert.is_edit:
+    if existing.scalar_one_or_none():
+        logger.debug("[Ingest] Duplicate message_id=%s — skipped", alert.message_id)
         return False, None
 
-    if raw and alert.is_edit:
-        raw.content = alert.content
-        raw.embeds = alert.embeds
-        raw.is_edit = True
-        await db.commit()
-        await db.refresh(raw)
-    else:
-        # ── 2. Persist raw alert ─────────────────────────────
-        raw = RawAlert(
-            message_id=alert.message_id,
-            channel_id=alert.channel_id,
-            author=alert.author,
-            content=alert.content,
-            embeds=alert.embeds,
-            is_edit=alert.is_edit,
-        )
-        db.add(raw)
-        await db.commit()
-        await db.refresh(raw)
+    # ── 2. Save raw alert ────────────────────────────────────
+    raw = RawAlert(
+        message_id=alert.message_id,
+        channel_id=alert.channel_id,
+        author=alert.author,
+        content=alert.content,
+        embeds=alert.embeds,
+        is_edit=alert.is_edit,
+    )
+    db.add(raw)
+    await db.flush()  # assign raw.id without full commit
 
-    # ── 3. Parse via ParsingAgent (regex + AI fallback) ──────
+    # ── 3. Parse ─────────────────────────────────────────────
     dto = await parsing_agent.parse_async(alert.content, alert.embeds)
     if not dto:
+        logger.warning("[Ingest] No format matched for message: %r", alert.content[:120])
+        await db.commit()  # save the raw alert even if unparseable
         return True, None
+
+    logger.info(
+        "[Ingest] Parsed: action=%s ticker=%s format=%s entry=%s",
+        dto.action, dto.ticker, dto.parse_format, dto.entry_price,
+    )
 
     # ── 4. Match follow-ups to parent ────────────────────────
     parent_id: str | None = None
-    action_enum = ActionType(dto.action)
-
-    if action_enum in _FOLLOWUP_ACTIONS:
+    if dto.is_followup:
         parent = await _find_parent(db, dto.ticker)
         if parent:
             parent_id = parent.id
-            new_status = _STATUS_ON_ACTION.get(action_enum)
-            if new_status:
-                parent.status = new_status
-                parent.updated_at = datetime.now(timezone.utc)
-                await db.commit()
+            new_status = _STATUS_ON_ACTION.get(ActionType(dto.action), parent.status)
+            parent.status = new_status
+            parent.updated_at = datetime.now(timezone.utc)
+            logger.info(
+                "[Ingest] Linked follow-up %s to parent %s → status=%s",
+                dto.action, parent_id, new_status.value,
+            )
 
     # ── 5. Persist ParsedSignal ──────────────────────────────
     signal = ParsedSignal(
         raw_alert_id=raw.id,
         parent_id=parent_id,
-        action=action_enum,
-        status=SignalStatus.OPEN,
-        ticker=dto.ticker,
-        contract_type=dto.contract_type,
+        action=ActionType(dto.action),
+        ticker=dto.ticker.upper(),
+        contract_type=ContractType(dto.contract_type) if dto.contract_type else ContractType.UNKNOWN,
         strike=dto.strike,
         expiry=dto.expiry,
         entry_price=dto.entry_price,
         target_price=dto.target_price,
         stop_loss=dto.stop_loss,
         parse_format=dto.parse_format,
+        status=SignalStatus.OPEN,
     )
     db.add(signal)
     await db.commit()
     await db.refresh(signal)
 
-    # ── 6. Auto-execute via BrokerPort ───────────────────────
-    import agents.execution as execution_agent
-    await execution_agent.execute(signal, db)
+    # ── 6. Execute (entry signals only) ─────────────────────
+    if not dto.is_followup:
+        await execution_agent.execute(signal, db)
 
     return True, signal
