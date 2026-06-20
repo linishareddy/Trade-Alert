@@ -76,7 +76,6 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
 
     # ── Step 1: EMA/VWAP validation ────────────────────────────
     from services.v1.validation.ema_vwap_validator import validate, ValidationResult
-    from services.v1.market_data.factory import get_market_data
 
     if runtime.get("ema_vwap_enabled"):
         validation = await validate(signal.ticker)
@@ -88,16 +87,21 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
             await _save_skipped_trade(db, signal, validation)
             return None
     else:
-        # Validation bypassed — fetch live price only
-        md = get_market_data()
-        current_price = await md.get_current_price(signal.ticker)
+        # Gate bypassed — still compute EMA/VWAP snapshot for DB / dashboard
+        snapshot = await validate(signal.ticker)
         validation = ValidationResult(
             passed=True,
-            current_price=current_price,
-            ema9=0.0, ema13=0.0, ema21=0.0, vwap=0.0,
-            reason="EMA/VWAP validation disabled (EMA_VWAP_ENABLED=false)",
+            current_price=snapshot.current_price,
+            ema9=snapshot.ema9,
+            ema13=snapshot.ema13,
+            ema21=snapshot.ema21,
+            vwap=snapshot.vwap,
+            reason=f"EMA/VWAP gate bypassed — snapshot: {snapshot.reason}",
         )
-        logger.info("[ExecutionAgent] EMA/VWAP gate bypassed for %s @ %.2f", signal.ticker, current_price)
+        logger.info(
+            "[ExecutionAgent] EMA/VWAP gate bypassed for %s @ %.2f (ema9=%.2f vwap=%.2f)",
+            signal.ticker, snapshot.current_price, snapshot.ema9, snapshot.vwap,
+        )
 
     # ── Step 3: Place bracket order ──────────────────────────
     from services.v1.broker.factory import get_broker

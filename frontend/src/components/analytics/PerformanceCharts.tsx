@@ -6,8 +6,19 @@ import { useTheme } from 'next-themes'
 import type { PaperTrade, Signal, ConfigResponse } from '@/types'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { getHours } from 'date-fns'
+import { cn } from '@/lib/utils/cn'
 
-export function PnLBySymbolChart({ trades }: { trades: PaperTrade[] }) {
+const CHART_H = 160
+
+function EmptyChart({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-zinc-50/50 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500" style={{ height: CHART_H }}>
+      {label}
+    </div>
+  )
+}
+
+export function PnLBySymbolChart({ trades, className }: { trades: PaperTrade[]; className?: string }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -25,23 +36,32 @@ export function PnLBySymbolChart({ trades }: { trades: PaperTrade[] }) {
 
   const axisColor = isDark ? '#52525b' : '#a1a1aa'
   const gridColor = isDark ? '#27272a' : '#f4f4f5'
+  const hasData = data.length > 0
+  const yMax = hasData ? Math.max(...data.map((d) => Math.abs(d.pnl)), 1) : 1
 
   return (
-    <Card padding="lg">
-      <CardHeader>
+    <Card padding="md" className={cn('flex flex-col', className)}>
+      <CardHeader className="mb-2 shrink-0">
         <div>
           <CardTitle>P&L by Symbol</CardTitle>
           <CardDescription className="mt-0.5">Total realized P&L per ticker</CardDescription>
         </div>
       </CardHeader>
-      {data.length === 0 ? (
-        <div className="flex h-44 items-center justify-center text-sm text-zinc-400">No data</div>
+      {!hasData ? (
+        <EmptyChart label="No closed trades yet" />
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={CHART_H}>
           <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="symbol" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} width={48} />
+            <YAxis
+              tick={{ fontSize: 10, fill: axisColor }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => `$${v}`}
+              width={48}
+              domain={[-yMax * 1.1, yMax * 1.1]}
+            />
             <Tooltip
               contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`, borderRadius: '8px', fontSize: '12px' }}
               formatter={(v: number) => [`$${v.toFixed(2)}`, 'P&L']}
@@ -58,24 +78,24 @@ export function PnLBySymbolChart({ trades }: { trades: PaperTrade[] }) {
   )
 }
 
-export function PnLDistributionChart({ trades, config }: { trades: PaperTrade[]; config?: ConfigResponse }) {
+export function PnLDistributionChart({ trades, config, className }: { trades: PaperTrade[]; config?: ConfigResponse; className?: string }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
-  const sl = (config?.stop_loss_pct ?? 0.10) * 100   // e.g. 10
-  const tp = (config?.take_profit_pct ?? 0.15) * 100  // e.g. 15
-  const slH = sl / 2   // half of SL
-  const tpT = tp / 3   // 1/3 of TP
-  const tpTT = (tp * 2) / 3 // 2/3 of TP
+  const sl = (config?.stop_loss_pct ?? 0.10) * 100
+  const tp = (config?.take_profit_pct ?? 0.15) * 100
+  const slH = sl / 2
+  const tpT = tp / 3
+  const tpTT = (tp * 2) / 3
 
   const buckets = [
-    { label: `<-${sl}%`,                   min: -Infinity, max: -sl,   count: 0 },
-    { label: `-${sl} to -${slH}%`,         min: -sl,       max: -slH,  count: 0 },
-    { label: `-${slH} to 0%`,              min: -slH,      max: 0,     count: 0 },
-    { label: `0 to +${tpT.toFixed(0)}%`,   min: 0,         max: tpT,   count: 0 },
+    { label: `<-${sl}%`, min: -Infinity, max: -sl, count: 0 },
+    { label: `-${sl} to -${slH}%`, min: -sl, max: -slH, count: 0 },
+    { label: `-${slH} to 0%`, min: -slH, max: 0, count: 0 },
+    { label: `0 to +${tpT.toFixed(0)}%`, min: 0, max: tpT, count: 0 },
     { label: `+${tpT.toFixed(0)} to +${tpTT.toFixed(0)}%`, min: tpT, max: tpTT, count: 0 },
-    { label: `+${tpTT.toFixed(0)} to +${tp}%`, min: tpTT, max: tp,    count: 0 },
-    { label: `>+${tp}%`,                   min: tp,        max: Infinity, count: 0 },
+    { label: `+${tpTT.toFixed(0)} to +${tp}%`, min: tpTT, max: tp, count: 0 },
+    { label: `>+${tp}%`, min: tp, max: Infinity, count: 0 },
   ]
 
   for (const t of trades) {
@@ -87,20 +107,28 @@ export function PnLDistributionChart({ trades, config }: { trades: PaperTrade[];
 
   const axisColor = isDark ? '#52525b' : '#a1a1aa'
   const gridColor = isDark ? '#27272a' : '#f4f4f5'
+  const maxCount = Math.max(...buckets.map((b) => b.count), 1)
 
   return (
-    <Card padding="lg">
-      <CardHeader>
+    <Card padding="md" className={cn('flex flex-col', className)}>
+      <CardHeader className="mb-2 shrink-0">
         <div>
           <CardTitle>P&L Distribution</CardTitle>
           <CardDescription className="mt-0.5">Trade count by P&L bucket</CardDescription>
         </div>
       </CardHeader>
-      <ResponsiveContainer width="100%" height={200}>
+      <ResponsiveContainer width="100%" height={CHART_H}>
         <BarChart data={buckets} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 8, fill: axisColor }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+          <YAxis
+            tick={{ fontSize: 10, fill: axisColor }}
+            axisLine={false}
+            tickLine={false}
+            allowDecimals={false}
+            width={28}
+            domain={[0, maxCount + 1]}
+          />
           <Tooltip
             contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`, borderRadius: '8px', fontSize: '12px' }}
             formatter={(v: number) => [v, 'Trades']}
@@ -109,11 +137,7 @@ export function PnLDistributionChart({ trades, config }: { trades: PaperTrade[];
             {buckets.map((b, i) => (
               <Cell
                 key={i}
-                fill={
-                  b.min >= 0
-                    ? isDark ? '#22c55e' : '#16a34a'
-                    : isDark ? '#ef4444' : '#dc2626'
-                }
+                fill={b.min >= 0 ? (isDark ? '#22c55e' : '#16a34a') : (isDark ? '#ef4444' : '#dc2626')}
                 fillOpacity={b.min >= 0 ? 0.85 : 0.7}
               />
             ))}
@@ -124,7 +148,7 @@ export function PnLDistributionChart({ trades, config }: { trades: PaperTrade[];
   )
 }
 
-export function SignalsByHourChart({ signals, config }: { signals: Signal[]; config?: ConfigResponse }) {
+export function SignalsByHourChart({ signals, config, className }: { signals: Signal[]; config?: ConfigResponse; className?: string }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -145,20 +169,28 @@ export function SignalsByHourChart({ signals, config }: { signals: Signal[]; con
 
   const axisColor = isDark ? '#52525b' : '#a1a1aa'
   const gridColor = isDark ? '#27272a' : '#f4f4f5'
+  const maxCount = Math.max(...data.map((d) => d.count), 1)
 
   return (
-    <Card padding="lg">
-      <CardHeader>
+    <Card padding="md" className={className}>
+      <CardHeader className="mb-2 shrink-0">
         <div>
           <CardTitle>Signals by Hour</CardTitle>
           <CardDescription className="mt-0.5">When Discord sends the most signals</CardDescription>
         </div>
       </CardHeader>
-      <ResponsiveContainer width="100%" height={200}>
+      <ResponsiveContainer width="100%" height={140}>
         <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="hour" tick={{ fontSize: 8, fill: axisColor }} axisLine={false} tickLine={false} interval={3} />
-          <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+          <YAxis
+            tick={{ fontSize: 10, fill: axisColor }}
+            axisLine={false}
+            tickLine={false}
+            allowDecimals={false}
+            width={28}
+            domain={[0, maxCount + 1]}
+          />
           <Tooltip
             contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`, borderRadius: '8px', fontSize: '12px' }}
           />
@@ -170,7 +202,7 @@ export function SignalsByHourChart({ signals, config }: { signals: Signal[]; con
         </BarChart>
       </ResponsiveContainer>
       <p className="mt-2 text-center text-[10px] text-zinc-400 dark:text-zinc-500">
-        <span className="inline-block h-2 w-2 rounded-sm bg-blue-500 mr-1" />
+        <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-blue-500" />
         Market hours ({config?.market_open ?? '09:30'}–{config?.market_close ?? '16:00'} ET)
       </p>
     </Card>

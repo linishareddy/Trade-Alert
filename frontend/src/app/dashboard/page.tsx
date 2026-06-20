@@ -33,9 +33,9 @@ export default function DashboardPage() {
 
   return (
     <AppShell title="Dashboard" subtitle="Trading overview and performance analytics">
-
-      <Stagger className="space-y-4">
-        <Stagger className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <Stagger className="space-y-5">
+        {/* ── KPI strip ─────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
           <StaggerItem>
             <KPICard
               title="Total P&L"
@@ -82,32 +82,35 @@ export default function DashboardPage() {
               loading={kpiLoad}
             />
           </StaggerItem>
-        </Stagger>
+        </div>
 
+        {/* ── Primary: P&L chart + signal funnel ─────────────────────── */}
+        <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
+          <StaggerItem className="lg:col-span-7">
+            <PnLChart trades={trades} loading={tradesLoading} className="h-full min-h-[280px]" />
+          </StaggerItem>
+          <StaggerItem className="lg:col-span-5">
+            <SignalFunnel trades={trades} signals={signals} loading={kpiLoad} className="h-full min-h-[280px]" />
+          </StaggerItem>
+        </div>
+
+        {/* ── Analytics row ───────────────────────────────────────────── */}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <StaggerItem>
+            <OutcomeDonut trades={trades} loading={tradesLoading} className="h-full" />
+          </StaggerItem>
+          <StaggerItem>
+            <PnLDistributionChart trades={trades} config={config} className="h-full" />
+          </StaggerItem>
+          <StaggerItem className="sm:col-span-2 xl:col-span-1">
+            <PnLBySymbolChart trades={trades} className="h-full" />
+          </StaggerItem>
+        </div>
+
+        {/* ── Signals timeline (full width) ─────────────────────────── */}
         <StaggerItem>
-          <PnLChart trades={trades} loading={tradesLoading} />
+          <SignalsByHourChart signals={signals} config={config} />
         </StaggerItem>
-
-        <Stagger className="grid gap-4 lg:grid-cols-2">
-          <StaggerItem>
-            <OutcomeDonut trades={trades} loading={tradesLoading} />
-          </StaggerItem>
-          <StaggerItem>
-            <SignalFunnel trades={trades} signals={signals} loading={kpiLoad} />
-          </StaggerItem>
-        </Stagger>
-
-        <Stagger className="grid gap-4 lg:grid-cols-2">
-          <StaggerItem>
-            <PnLDistributionChart trades={trades} config={config} />
-          </StaggerItem>
-          <StaggerItem>
-            <PnLBySymbolChart trades={trades} />
-          </StaggerItem>
-          <StaggerItem>
-            <SignalsByHourChart signals={signals} config={config} />
-          </StaggerItem>
-        </Stagger>
 
         <StaggerItem>
           <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
@@ -118,7 +121,6 @@ export default function DashboardPage() {
           </p>
         </StaggerItem>
       </Stagger>
-
     </AppShell>
   )
 }

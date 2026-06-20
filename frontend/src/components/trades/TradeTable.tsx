@@ -16,11 +16,20 @@ interface TradeTableProps {
   trades: PaperTrade[]
   loading?: boolean
   showFilters?: boolean
+  hideStatusFilter?: boolean
   title?: string
 }
 
 function EmaVwapCell({ trade }: { trade: PaperTrade }) {
-  if (!trade.ema9) return <span className="text-zinc-400 dark:text-zinc-500">—</span>
+  const hasSnapshot = (trade.ema9 ?? 0) > 0 || (trade.vwap ?? 0) > 0
+  const bypassed = trade.validation_reason?.toLowerCase().includes('bypassed')
+
+  if (!hasSnapshot) {
+    if (bypassed || trade.validation_reason?.includes('disabled')) {
+      return <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Bypassed</span>
+    }
+    return <span className="text-zinc-400 dark:text-zinc-500">—</span>
+  }
   const checks = [
     { label: 'EMA9', pass: trade.entry_price > (trade.ema9 ?? 0) },
     { label: 'EMA13', pass: trade.entry_price > (trade.ema13 ?? 0) },
@@ -47,7 +56,7 @@ function EmaVwapCell({ trade }: { trade: PaperTrade }) {
   )
 }
 
-export function TradeTable({ trades, loading, showFilters = true, title }: TradeTableProps) {
+export function TradeTable({ trades, loading, showFilters = true, hideStatusFilter = false, title }: TradeTableProps) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('ALL')
   const [exitFilter, setExitFilter] = useState<string>('ALL')
@@ -111,6 +120,7 @@ export function TradeTable({ trades, loading, showFilters = true, title }: Trade
                 className="h-8 w-32 rounded-lg border border-zinc-200 bg-zinc-50 pl-8 pr-3 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
               />
             </div>
+            {!hideStatusFilter && (
             <select
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}
@@ -121,6 +131,8 @@ export function TradeTable({ trades, loading, showFilters = true, title }: Trade
               <option value="CLOSED">Closed</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
+            )}
+            {!hideStatusFilter && (
             <select
               value={exitFilter}
               onChange={(e) => { setExitFilter(e.target.value); setPage(0) }}
@@ -131,6 +143,7 @@ export function TradeTable({ trades, loading, showFilters = true, title }: Trade
               <option value="SL_HIT">SL Hit</option>
               <option value="MANUAL">Manual</option>
             </select>
+            )}
           </div>
         </div>
       )}
@@ -232,10 +245,10 @@ export function TradeTable({ trades, loading, showFilters = true, title }: Trade
                         <div className="grid grid-cols-2 gap-4 text-xs sm:grid-cols-4">
                           {[
                             ['Broker Order ID', trade.broker_order_id ?? '—'],
-                            ['EMA9', trade.ema9 != null ? `$${trade.ema9.toFixed(2)}` : '—'],
-                            ['EMA13', trade.ema13 != null ? `$${trade.ema13.toFixed(2)}` : '—'],
-                            ['EMA21', trade.ema21 != null ? `$${trade.ema21.toFixed(2)}` : '—'],
-                            ['VWAP', trade.vwap != null ? `$${trade.vwap.toFixed(2)}` : '—'],
+                            ['EMA9', trade.ema9 && trade.ema9 > 0 ? fmtPrice(trade.ema9) : '—'],
+                            ['EMA13', trade.ema13 && trade.ema13 > 0 ? fmtPrice(trade.ema13) : '—'],
+                            ['EMA21', trade.ema21 && trade.ema21 > 0 ? fmtPrice(trade.ema21) : '—'],
+                            ['VWAP', trade.vwap && trade.vwap > 0 ? fmtPrice(trade.vwap) : '—'],
                             ['Exit Price', fmtPrice(trade.exit_price)],
                             ['Closed At', fmtDate(trade.closed_at)],
                             ['Qty', trade.qty],

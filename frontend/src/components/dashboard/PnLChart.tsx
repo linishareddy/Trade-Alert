@@ -13,13 +13,15 @@ import { format } from 'date-fns'
 import type { PaperTrade } from '@/types'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { ChartSkeleton } from '@/components/ui/Skeleton'
+import { cn } from '@/lib/utils/cn'
 
 interface PnLChartProps {
   trades: PaperTrade[]
   loading?: boolean
+  className?: string
 }
 
-export function PnLChart({ trades, loading }: PnLChartProps) {
+export function PnLChart({ trades, loading, className }: PnLChartProps) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -47,79 +49,90 @@ export function PnLChart({ trades, loading }: PnLChartProps) {
   const gridColor = isDark ? '#27272a' : '#f4f4f5'
   const axisColor = isDark ? '#52525b' : '#a1a1aa'
 
+  const pnlValues = data.map((d) => d.pnl)
+  const yMin = pnlValues.length ? Math.min(...pnlValues, 0) : 0
+  const yMax = pnlValues.length ? Math.max(...pnlValues, 0) : 0
+  const yPad = yMin === yMax ? 10 : Math.max(Math.abs(yMax - yMin) * 0.15, 5)
+
   return (
-    <Card padding="lg">
-      <CardHeader>
+    <Card padding="md" className={cn('flex flex-col', className)}>
+      <CardHeader className="mb-3 shrink-0">
         <div>
           <CardTitle>Cumulative P&L</CardTitle>
           <CardDescription className="mt-0.5">Running total across all closed trades</CardDescription>
         </div>
         {data.length > 0 && (
-          <p className={`text-lg font-bold ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+          <p className={cn(
+            'text-lg font-bold',
+            isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
+          )}>
             {data[data.length - 1].pnl >= 0 ? '+' : ''}${data[data.length - 1].pnl.toFixed(2)}
           </p>
         )}
       </CardHeader>
 
-      {loading ? (
-        <ChartSkeleton height={220} />
-      ) : data.length === 0 ? (
-        <div className="flex h-56 items-center justify-center text-sm text-zinc-400 dark:text-zinc-500">
-          No closed trades yet
-        </div>
-      ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="greenGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.15} />
-                <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="redGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
-                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10, fill: axisColor }}
-              axisLine={false}
-              tickLine={false}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: axisColor }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) => `$${v}`}
-              width={52}
-            />
-            <Tooltip
-              contentStyle={{
-                background: isDark ? '#18181b' : '#ffffff',
-                border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`,
-                borderRadius: '8px',
-                fontSize: '12px',
-                color: isDark ? '#fafafa' : '#09090b',
-              }}
-              formatter={(value: number, _: string, props: { payload?: { trade?: string; individual?: number } }) => [
-                `$${(value as number).toFixed(2)}`,
-                `Cumulative (${props.payload?.trade ?? ''} ${(props.payload?.individual ?? 0) >= 0 ? '+' : ''}$${(props.payload?.individual ?? 0)})`,
-              ]}
-            />
-            <Area
-              type="monotone"
-              dataKey="pnl"
-              stroke={lineColor}
-              strokeWidth={2}
-              fill={`url(#${fillId})`}
-              dot={data.length < 20 ? { r: 3, fill: lineColor, strokeWidth: 0 } : false}
-              activeDot={{ r: 4, fill: lineColor }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      )}
+      <div className="min-h-0 flex-1">
+        {loading ? (
+          <ChartSkeleton height={180} />
+        ) : data.length === 0 ? (
+          <div className="flex h-full min-h-[160px] items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-zinc-50/50 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500">
+            No closed trades yet
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%" minHeight={160}>
+            <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="greenGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="redGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: axisColor }}
+                axisLine={false}
+                tickLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: axisColor }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `$${v}`}
+                width={52}
+                domain={[yMin - yPad, yMax + yPad]}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: isDark ? '#18181b' : '#ffffff',
+                  border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`,
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: isDark ? '#fafafa' : '#09090b',
+                }}
+                formatter={(value: number, _: string, props: { payload?: { trade?: string; individual?: number } }) => [
+                  `$${(value as number).toFixed(2)}`,
+                  `Cumulative (${props.payload?.trade ?? ''} ${(props.payload?.individual ?? 0) >= 0 ? '+' : ''}$${(props.payload?.individual ?? 0)})`,
+                ]}
+              />
+              <Area
+                type="monotone"
+                dataKey="pnl"
+                stroke={lineColor}
+                strokeWidth={2}
+                fill={`url(#${fillId})`}
+                dot={data.length < 20 ? { r: 3, fill: lineColor, strokeWidth: 0 } : false}
+                activeDot={{ r: 4, fill: lineColor }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </Card>
   )
 }

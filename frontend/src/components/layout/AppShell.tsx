@@ -60,7 +60,7 @@ export function AppShell({ children, title, subtitle }: AppShellProps) {
         )}
 
         <main className="flex-1 overflow-y-auto">
-          <div className="w-full px-14 py-6">
+          <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
             <PageMotion>{children}</PageMotion>
           </div>
         </main>
