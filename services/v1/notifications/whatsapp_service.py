@@ -3,12 +3,9 @@ whatsapp_service.py
 
 Sends WhatsApp notifications via Twilio.
 
-Every trade event triggers one message:
-  signal_received  → Discord signal parsed, EMA/VWAP check starting
-  trade_opened     → Bracket order placed on Alpaca paper account
-  trade_skipped    → EMA/VWAP validation failed, no trade placed
-  tp_hit           → Take profit triggered, position closed
-  sl_hit           → Stop loss triggered, position closed
+Every trade event can trigger WhatsApp (currently only Discord forward is enabled):
+  notify_discord_message → raw Discord text forwarded on ingest
+  notify_signal_received / notify_trade_opened / notify_trade_skipped / tp / sl → reserved for later
 
 All sends are fire-and-forget (async, non-blocking).
 If Twilio fails, the error is logged and the trade pipeline continues.
@@ -47,7 +44,8 @@ async def _send(body: str) -> bool:
     Always non-blocking — wrapped in try/except.
     """
     if not _enabled():
-        logger.debug("[WhatsApp] Notifications disabled or not configured.")
+        print("[WhatsApp] Skipped — alerts disabled or Twilio not configured")
+        logger.warning("[WhatsApp] Notifications disabled or not configured.")
         return False
 
     from services.v1.config.runtime_settings import runtime
@@ -59,9 +57,10 @@ async def _send(body: str) -> bool:
             to=f"{_WA}{runtime.get('whatsapp_to')}",
             body=body,
         )
-        logger.info("[WhatsApp] ✅ Sent — SID=%s", msg.sid)
+        print(f"[WhatsApp] ✅ Sent — SID={msg.sid}")
         return True
     except Exception as exc:
+        print(f"[WhatsApp] ❌ Failed to send: {exc}")
         logger.error("[WhatsApp] ❌ Failed to send: %s", exc)
         return False
 
@@ -184,10 +183,12 @@ async def notify_sl_hit(
     await _send(body)
 
 
-async def notify_discord_message(content: str) -> None:
-    """Forward raw Discord message text to WhatsApp."""
-    body = f"📢 Discord Alert\n━━━━━━━━━━━━━━━━━━━━\n{content}"
-    await _send(body)
+async def notify_discord_message(content: str) -> bool:
+    """Forward the raw Discord message text to WhatsApp."""
+    text = content.strip()
+    if not text:
+        return False
+    return await _send(text)
 
 
 async def notify_test(phone_hint: str = "") -> bool:

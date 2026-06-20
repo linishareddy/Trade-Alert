@@ -78,7 +78,12 @@ class _RuntimeSettings:
     def get(self, key: str) -> Any:
         """Return the runtime value — DB override wins over .env."""
         if key in self._overrides:
-            return self._overrides[key]
+            val = self._overrides[key]
+            _, type_fn = EDITABLE[key]
+            # Empty string saved from Integrations UI should not block .env defaults
+            if type_fn is str and val == "":
+                return self.env_get(key)
+            return val
         return self.env_get(key)
 
     def env_get(self, key: str) -> Any:

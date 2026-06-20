@@ -4,10 +4,11 @@ ingestion_service.py
 Orchestrates the full ingest pipeline:
 1. Deduplicate — skip already-seen message_ids
 2. Save raw alert to DB (raw_alerts table)
-3. Parse via ParsingAgent (regex first, Groq AI fallback)
-4. Match follow-up messages to their parent ParsedSignal
-5. Persist ParsedSignal to parsed_signals table
-6. Auto-execute via ExecutionAgent (if EXECUTION_ENABLED=true)
+3. Forward raw Discord text to WhatsApp (when enabled)
+4. Parse via ParsingAgent (regex first, Groq AI fallback)
+5. Match follow-up messages to their parent ParsedSignal
+6. Persist ParsedSignal to parsed_signals table
+7. Auto-execute via ExecutionAgent (if EXECUTION_ENABLED=true)
 """
 from __future__ import annotations
 import logging
@@ -55,6 +56,25 @@ async def _find_parent(
     return result.scalar_one_or_none()
 
 
+def _discord_message_text(content: str, embeds: list) -> str:
+    if content.strip():
+        return content.strip()
+    if embeds:
+        lines: list[str] = []
+        for embed in embeds:
+            title = (embed.get("title") or "").strip()
+            if title:
+                lines.append(title)
+            for field in embed.get("fields", []):
+                name = (field.get("name") or "").strip()
+                value = (field.get("value") or "").strip()
+                if name or value:
+                    lines.append(f"{name}: {value}".strip(": "))
+        if lines:
+            return "\n".join(lines)
+    return "[Empty Discord message]"
+
+
 async def ingest_alert(
     db: AsyncSession, alert: RawAlertIn
 ) -> tuple[bool, ParsedSignal | None]:
@@ -68,7 +88,7 @@ async def ingest_alert(
         select(RawAlert).where(RawAlert.message_id == alert.message_id)
     )
     if existing.scalar_one_or_none():
-        logger.debug("[Ingest] Duplicate message_id=%s — skipped", alert.message_id)
+        print(f"[Ingest] Duplicate skipped — message_id={alert.message_id}")
         return False, None
 
     # ── 2. Save raw alert ────────────────────────────────────
@@ -82,6 +102,13 @@ async def ingest_alert(
     )
     db.add(raw)
     await db.flush()  # assign raw.id without full commit
+
+    text = _discord_message_text(alert.content, alert.embeds)
+    print(f"[Ingest] New Discord message from {alert.author}: {text[:100]}")
+
+    from services.v1.notifications.whatsapp_service import notify_discord_message
+    wa_ok = await notify_discord_message(text)
+    print(f"[Ingest] WhatsApp forward: {'✅ sent' if wa_ok else '❌ not sent (check toggle + Twilio)'}")
 
     # ── 3. Parse ─────────────────────────────────────────────
     dto = await parsing_agent.parse_async(alert.content, alert.embeds)

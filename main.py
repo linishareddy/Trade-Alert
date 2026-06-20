@@ -86,9 +86,15 @@ app = create_app()
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _main() -> None:
+    import logging
     import uvicorn
     from agents.discord.discord_agent import run_discord_agent
     from agents.monitor.monitor_agent import run_monitor_agent
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+    )
 
     config = uvicorn.Config(
         "main:app",

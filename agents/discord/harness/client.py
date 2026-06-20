@@ -1,23 +1,27 @@
 """
 client.py
 
-Thin async HTTP client that POSTs raw alerts to the FastAPI ingest endpoint.
+Delivers raw Discord alerts into the ingest pipeline in-process.
+Avoids HTTP loopback to localhost, which can deadlock/time out when
+Discord and FastAPI share the same asyncio event loop.
 """
 from __future__ import annotations
-import httpx
-from config.settings import settings
+
+from db.session import AsyncSessionLocal
+from schemas.v1.ingest import RawAlertIn
+from services.v1.discord import ingestion_service
 
 
 async def post_alert(payload: dict) -> bool:
     """
-    POST a raw alert dict to the ingest endpoint.
+    Deliver a raw alert dict to the ingest pipeline.
     Returns True on success, False on failure.
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(settings.INGEST_URL, json=payload)
-            response.raise_for_status()
-            return True
-    except Exception as e:
-        print(f"[DiscordAgent] Failed to post alert: {e}")
+        alert = RawAlertIn(**payload)
+        async with AsyncSessionLocal() as db:
+            accepted, _ = await ingestion_service.ingest_alert(db, alert)
+        return accepted
+    except Exception as exc:
+        print(f"[DiscordAgent] Failed to post alert: {type(exc).__name__}: {exc!r}")
         return False

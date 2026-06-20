@@ -118,25 +118,4 @@ async def _sync_open_trades() -> None:
                 db_trade.pnl_pct or 0,
             )
 
-            # ── WhatsApp notification ─────────────────────────────
-            from services.v1.notifications.whatsapp_service import notify_tp_hit, notify_sl_hit
-            if exit_reason == ExitReason.TP_HIT:
-                asyncio.create_task(notify_tp_hit(
-                    ticker=trade.symbol,
-                    entry_price=trade.entry_price,
-                    exit_price=current_price or trade.take_profit_price,
-                    pnl_pct=db_trade.pnl_pct or 0,
-                    pnl_dollars=db_trade.pnl_dollars or 0,
-                    trade_id=trade.id,
-                ))
-            else:
-                asyncio.create_task(notify_sl_hit(
-                    ticker=trade.symbol,
-                    entry_price=trade.entry_price,
-                    exit_price=current_price or trade.stop_loss_price,
-                    pnl_pct=db_trade.pnl_pct or 0,
-                    pnl_dollars=db_trade.pnl_dollars or 0,
-                    trade_id=trade.id,
-                ))
-
         await db.commit()

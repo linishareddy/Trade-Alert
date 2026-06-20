@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432
     DB_NAME: str = "tradealert"
+    DB_SSL: bool = False  # set True for Aiven / other managed Postgres
+    DB_SSL_CA_FILE: str = ""  # optional path to ca.pem from Aiven console
 
     @property
     def DATABASE_URL(self) -> str:  # noqa: N802
@@ -108,6 +110,21 @@ class Settings(BaseSettings):
         if not self.DISCORD_TARGET_CHANNEL_IDS:
             return []
         return [int(c.strip()) for c in self.DISCORD_TARGET_CHANNEL_IDS.split(",") if c.strip()]
+
+    @property
+    def ema_period_list(self) -> list[int]:
+        periods = [int(p.strip()) for p in self.EMA_PERIODS.split(",") if p.strip()]
+        if not periods:
+            raise ValueError("EMA_PERIODS must contain at least one period")
+        return periods
+
+    @property
+    def min_bars_required(self) -> int:
+        return max(self.ema_period_list)
+
+    @property
+    def supported_contract_names(self) -> set[str]:
+        return {c.strip().upper() for c in self.SUPPORTED_CONTRACTS.split(",") if c.strip()}
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -27,6 +27,12 @@ def _discord_channel_ids() -> list[int]:
     return [int(c.strip()) for c in raw.split(",") if c.strip()]
 
 
+def _process_own_messages() -> bool:
+    """In development, allow testing by posting from the same Discord account as the bot."""
+    from config.settings import settings
+    return settings.ENVIRONMENT == "development"
+
+
 class TradingBot(discord.Client):
     def __init__(self) -> None:
         # DO NOT USE INTENTS for self-bots. Discord will reject the token as invalid!
@@ -71,9 +77,11 @@ class TradingBot(discord.Client):
     async def on_message(self, message: discord.Message) -> None:
         if message.channel.id not in self.target_channel_ids:
             return
-        if message.author.id == self.user.id:
+        if message.author.id == self.user.id and not _process_own_messages():
             return
 
+        preview = (message.content[:60] + "...") if message.content and len(message.content) > 60 else (message.content or "[embed]")
+        print(f"[DiscordAgent] 📩 Received from {message.author}: {preview}")
         await self._process(message, is_edit=False)
 
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
@@ -98,7 +106,7 @@ class TradingBot(discord.Client):
         ok = await post_alert(payload)
         status = "✅" if ok else "❌"
         preview = (message.content[:75] + "...") if message.content else "[Embeds only]"
-        print(f"[DiscordAgent] {status} | {message.id[-6:]} | {message.author} | {preview}")
+        print(f"[DiscordAgent] {status} | {str(message.id)[-6:]} | {message.author} | {preview}")
 
 
 async def _watch_reconnect(bot: discord.Client) -> None:

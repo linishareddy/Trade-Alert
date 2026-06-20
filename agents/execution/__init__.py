@@ -13,7 +13,6 @@ The agent never imports Alpaca or Webull directly — it talks only to
 BrokerPort. Changing BROKER= in .env swaps the broker with no code change.
 """
 from __future__ import annotations
-import asyncio
 import logging
 from datetime import datetime
 
@@ -30,8 +29,10 @@ logger = logging.getLogger(__name__)
 # Only BUY signals trigger a new position
 _ENTRY_ACTIONS = {ActionType.BUY}
 
-# Only stock signals for now — options require different sizing
-_SUPPORTED_CONTRACT_TYPES = {ContractType.STOCK, ContractType.UNKNOWN}
+
+def _supported_contract_types() -> set[ContractType]:
+    allowed = settings.supported_contract_names
+    return {ContractType(name) for name in allowed if name in ContractType.__members__}
 
 
 def _is_market_open() -> bool:
@@ -60,8 +61,8 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
         logger.debug("[ExecutionAgent] Action=%s — not an entry. Skipping.", signal.action)
         return None
 
-    # ── Guard: only stocks (options sizing TBD) ──────────────
-    if signal.contract_type not in _SUPPORTED_CONTRACT_TYPES:
+    # ── Guard: supported contract types ─────────────────────
+    if signal.contract_type not in _supported_contract_types():
         logger.info(
             "[ExecutionAgent] contract_type=%s not supported yet. Skipping %s.",
             signal.contract_type, signal.ticker,
@@ -73,19 +74,7 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
         logger.warning("[ExecutionAgent] Market closed. Skipping %s.", signal.ticker)
         return None
 
-    # ── Step 1: Notify signal received ───────────────────────
-    from services.v1.notifications.whatsapp_service import (
-        notify_signal_received, notify_trade_opened,
-    )
-    asyncio.create_task(notify_signal_received(
-        ticker=signal.ticker,
-        action=signal.action.value,
-        entry_price=signal.entry_price,
-        stop_loss=signal.stop_loss,
-        parse_format=signal.parse_format,
-    ))
-
-    # ── Step 2: EMA/VWAP validation ──────────────────────────
+    # ── Step 1: EMA/VWAP validation ────────────────────────────
     from services.v1.validation.ema_vwap_validator import validate, ValidationResult
     from services.v1.market_data.factory import get_market_data
 
@@ -165,22 +154,6 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
         validation.current_price, tp_price, sl_price,
         result.broker_order_id,
     )
-
-    # ── Step 5: Notify trade opened ──────────────────────────
-    asyncio.create_task(notify_trade_opened(
-        ticker=signal.ticker,
-        qty=qty,
-        entry_price=validation.current_price,
-        tp_price=tp_price,
-        sl_price=sl_price,
-        tp_pct=tp_pct,
-        sl_pct=sl_pct,
-        broker=settings.BROKER,
-        ema9=validation.ema9,
-        ema13=validation.ema13,
-        ema21=validation.ema21,
-        vwap=validation.vwap,
-    ))
 
     return trade
 

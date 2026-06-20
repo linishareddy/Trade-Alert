@@ -571,7 +571,7 @@ export function SystemStatus({ health, config, isOnline, isError, loading }: Sys
           {config ? (
             <>
               <ToggleRow
-                icon={Brain} label="AI Parsing"
+                icon={Brain} label="AI"
                 configKey="ai_parsing_enabled" value={config.ai_parsing_enabled}
                 isLoading={isRowLoading('ai_parsing_enabled')}
                 globalDisabled={isRowDisabled('ai_parsing_enabled')}
