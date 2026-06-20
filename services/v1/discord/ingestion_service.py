@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from db.models.raw_alert import RawAlert
 from db.models.parsed_signal import ParsedSignal, SignalStatus, ActionType, ContractType
@@ -101,7 +102,12 @@ async def ingest_alert(
         is_edit=alert.is_edit,
     )
     db.add(raw)
-    await db.flush()  # assign raw.id without full commit
+    try:
+        await db.flush()  # assign raw.id without full commit
+    except IntegrityError:
+        await db.rollback()
+        print(f"[Ingest] Duplicate (DB constraint) — message_id={alert.message_id}")
+        return False, None
 
     text = _discord_message_text(alert.content, alert.embeds)
     print(f"[Ingest] New Discord message from {alert.author}: {text[:100]}")

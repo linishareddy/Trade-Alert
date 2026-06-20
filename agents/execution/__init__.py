@@ -149,10 +149,10 @@ async def execute(signal: ParsedSignal, db: AsyncSession) -> PaperTrade | None:
     await db.refresh(trade)
 
     logger.info(
-        "[ExecutionAgent] ✅ Trade opened — %s %s x%d @ %.2f | TP=%.2f SL=%.2f | order=%s",
+        "[ExecutionAgent] ✅ Order submitted — %s %s x%d @ %.2f | TP=%.2f SL=%.2f | order=%s | broker_status=%s",
         settings.BROKER.upper(), signal.ticker, qty,
         validation.current_price, tp_price, sl_price,
-        result.broker_order_id,
+        result.broker_order_id, result.status,
     )
 
     return trade
