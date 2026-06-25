@@ -1,0 +1,923 @@
+{
+    "tables": [
+        {
+            "name": "raw_alerts",
+            "description": "Stores raw, unprocessed trade alert messages ingested from Discord channels. Each row represents a single message received from a trading signal provider. This is the source-of-truth for all incoming alerts before any parsing or enrichment.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the raw alert record.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "message_id",
+                    "description": "The unique Discord message ID assigned by Discord to the original message. Used to deduplicate alerts on re-ingestion.",
+                    "type": "VARCHAR(32)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "channel_id",
+                    "description": "The Discord channel ID from which the alert message was received. Identifies which signal provider or channel the alert originated from.",
+                    "type": "VARCHAR(32)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "author",
+                    "description": "The Discord username or bot name that posted the alert message.",
+                    "type": "VARCHAR(128)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "content",
+                    "description": "The full plain-text body of the Discord message. Contains the raw trade signal text before AI parsing.",
+                    "type": "TEXT",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "embeds",
+                    "description": "JSON array of Discord embed objects attached to the message. Contains structured embed data such as titles, descriptions, and fields that may carry additional trade signal details.",
+                    "type": "JSON",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "is_edit",
+                    "description": "Flag indicating whether this record represents an edited version of a previously ingested Discord message (true) or a brand-new message (false).",
+                    "type": "BOOLEAN",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "received_at",
+                    "description": "UTC timestamp of when the raw alert message was received and persisted by the system.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [],
+            "indexes": [
+                {
+                    "name": "raw_alerts_message_id_key",
+                    "column_names": [
+                        "message_id"
+                    ],
+                    "unique": true
+                }
+            ]
+        },
+        {
+            "name": "parsed_signals",
+            "description": "Stores AI-parsed trade signals extracted from raw Discord alert messages. Each row represents a structured, actionable trading signal (buy, sell, or close) derived from a raw alert. Supports hierarchical signals via a self-referencing parent_id for multi-leg or update signals.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the parsed signal record.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "raw_alert_id",
+                    "description": "Foreign key referencing raw_alerts.id. Links this parsed signal back to the original Discord message it was extracted from.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "parent_id",
+                    "description": "Self-referencing foreign key to parsed_signals.id. If set, this signal is a child or update of a parent signal (e.g., a closing signal referencing the original entry signal). Null for top-level signals.",
+                    "type": "VARCHAR(36)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "action",
+                    "description": "The trade action extracted from the alert. Possible values: 'BUY', 'SELL', or 'CLOSE'. Determines how the signal is routed to the trade executor.",
+                    "type": "VARCHAR(6)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "status",
+                    "description": "Current processing status of the parsed signal. Use the EXACT enum values only. Possible values: 'NEW' (received but not yet acted on), 'QUEUED', 'SENT' (forwarded to broker), 'FILLED', 'FAILED', or 'SKIPPED'. IMPORTANT: Do NOT use 'ACTIVE', 'OPEN', or any other value.",
+                    "type": "VARCHAR(7)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "ticker",
+                    "description": "The stock or ETF ticker symbol extracted from the alert (e.g., 'AAPL', 'SPY'). Represents the underlying asset for the trade.",
+                    "type": "VARCHAR(16)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "contract_type",
+                    "description": "The options contract type if the signal is for an options trade. Possible values: 'CALL', 'PUT', or 'STOCK' for equity trades.",
+                    "type": "VARCHAR(7)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "strike",
+                    "description": "The options strike price extracted from the signal. Null for stock (non-options) trades.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "expiry",
+                    "description": "The options contract expiration date extracted from the signal. Null for stock trades.",
+                    "type": "DATE",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "entry_price",
+                    "description": "The suggested entry price for the trade as parsed from the alert. May be null if the alert does not specify a price (e.g., market order signals).",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "target_price",
+                    "description": "The take-profit target price parsed from the alert. Represents the intended exit price for a winning trade.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "stop_loss",
+                    "description": "The stop-loss price parsed from the alert. Represents the price level at which the trade should be exited to limit losses.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "parse_format",
+                    "description": "The parser template or format used to extract this signal from the raw alert (e.g., 'REGEX', 'AI_GROQ', 'MANUAL'). Useful for auditing and debugging parse quality.",
+                    "type": "VARCHAR(16)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when the parsed signal record was created.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last update to this parsed signal record.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [
+                {
+                    "name": "parsed_signals_parent_id_fkey",
+                    "constrained_columns": [
+                        "parent_id"
+                    ],
+                    "referred_table": "parsed_signals",
+                    "referred_columns": [
+                        "id"
+                    ]
+                },
+                {
+                    "name": "parsed_signals_raw_alert_id_fkey",
+                    "constrained_columns": [
+                        "raw_alert_id"
+                    ],
+                    "referred_table": "raw_alerts",
+                    "referred_columns": [
+                        "id"
+                    ]
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "ix_parsed_signals_action",
+                    "column_names": [
+                        "action"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_parsed_signals_raw_alert_id",
+                    "column_names": [
+                        "raw_alert_id"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_parsed_signals_ticker",
+                    "column_names": [
+                        "ticker"
+                    ],
+                    "unique": false
+                }
+            ]
+        },
+        {
+            "name": "signals",
+            "description": "Stores the canonical, actionable trade signals derived from parsed alerts. Acts as the primary trading signal ledger that downstream services (trade executor, paper trader) consume. Supports parent-child hierarchy for multi-leg or update signals.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the signal record.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "raw_alert_id",
+                    "description": "Foreign key referencing raw_alerts.id. Traces this signal back to the original Discord message that triggered it.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "ticker",
+                    "description": "The underlying stock or ETF ticker symbol for this signal (e.g., 'TSLA', 'SPY'). Used for order routing and position matching.",
+                    "type": "VARCHAR(16)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "action",
+                    "description": "The trading action for this signal. Possible values: 'BUY' to open a long position, 'SELL' to open a short, or 'CLOSE' to exit an existing position.",
+                    "type": "VARCHAR(6)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "entry_price",
+                    "description": "The price at which the trade should be entered. Null if no specific entry price was given (implies a market order).",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "target_price",
+                    "description": "The intended take-profit price for the signal. Null if not specified.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "stop_loss",
+                    "description": "The price level at which the trade should be closed to limit losses. Null if not specified.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "status",
+                    "description": "Lifecycle status of the signal. Use the EXACT enum values only. Possible values: 'OPEN' (open/active position), 'PARTIAL' (partially filled/scaled), 'CLOSED' (exited). IMPORTANT: Do NOT use 'ACTIVE', 'PENDING', 'FAILED', or 'SKIPPED' — those values do not exist in the database and will cause an error.",
+                    "type": "VARCHAR(7)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "parent_signal_id",
+                    "description": "Self-referencing foreign key to signals.id. Links a closing or update signal to its original entry signal. Null for standalone signals.",
+                    "type": "VARCHAR(36)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when the signal was created.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last status or data update for this signal.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [
+                {
+                    "name": "signals_parent_signal_id_fkey",
+                    "constrained_columns": [
+                        "parent_signal_id"
+                    ],
+                    "referred_table": "signals",
+                    "referred_columns": [
+                        "id"
+                    ]
+                },
+                {
+                    "name": "signals_raw_alert_id_fkey",
+                    "constrained_columns": [
+                        "raw_alert_id"
+                    ],
+                    "referred_table": "raw_alerts",
+                    "referred_columns": [
+                        "id"
+                    ]
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "ix_signals_ticker",
+                    "column_names": [
+                        "ticker"
+                    ],
+                    "unique": false
+                }
+            ]
+        },
+        {
+            "name": "paper_trades",
+            "description": "Records simulated (paper) trades executed in response to signals without real money. Each row tracks the full lifecycle of a paper trade — from entry to exit — including PnL, technical validation indicators, and exit reason. Used for backtesting, strategy evaluation, and signal quality assessment.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the paper trade record.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "parsed_signal_id",
+                    "description": "Foreign key referencing parsed_signals.id. Links this paper trade to the specific parsed signal that triggered it.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "broker",
+                    "description": "The broker or paper-trading environment used to simulate this trade (e.g., 'alpaca', 'webull', 'internal').",
+                    "type": "VARCHAR(32)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "broker_order_id",
+                    "description": "The order ID returned by the broker's paper trading API for this simulated order. Null if the order was simulated internally without an external broker call.",
+                    "type": "VARCHAR(128)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "symbol",
+                    "description": "The ticker symbol of the asset traded in this paper trade (e.g., 'AAPL', 'SPY').",
+                    "type": "VARCHAR(16)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "qty",
+                    "description": "The number of shares or contracts traded in this paper trade.",
+                    "type": "INTEGER",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "entry_price",
+                    "description": "The price at which the simulated position was opened.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "take_profit_price",
+                    "description": "The target price at which the paper trade was configured to automatically take profit.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "stop_loss_price",
+                    "description": "The stop-loss price at which the paper trade was configured to automatically exit to limit losses.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "exit_price",
+                    "description": "The actual price at which the simulated position was closed. Null if the trade is still open.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "exit_reason",
+                    "description": "The reason the paper trade was closed. Possible values: 'TP' (take profit hit), 'SL' (stop loss hit), 'CLOSE' (manual close signal), or 'EXPIRY'.",
+                    "type": "VARCHAR(6)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "pnl_pct",
+                    "description": "Profit or loss as a percentage of the entry price for this paper trade. Positive = profit, negative = loss. Null if the trade is still open.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "pnl_dollars",
+                    "description": "Absolute profit or loss in USD for this paper trade (entry_price difference × qty). Null if the trade is still open.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "status",
+                    "description": "Current status of the paper trade. Possible values: 'OPEN' (active position), 'CLOSED' (exited), 'CANCELLED', or 'FAILED'.",
+                    "type": "VARCHAR(9)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "validation_passed",
+                    "description": "Boolean flag indicating whether the signal passed pre-trade technical validation checks (e.g., EMA/VWAP alignment). True means the trade met all criteria; false means it was taken despite failing validation.",
+                    "type": "BOOLEAN",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "ema9",
+                    "description": "The 9-period Exponential Moving Average value at the time this trade was entered. Used for trend confirmation validation.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "ema13",
+                    "description": "The 13-period Exponential Moving Average value at the time this trade was entered. Used for trend confirmation validation.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "ema21",
+                    "description": "The 21-period Exponential Moving Average value at the time this trade was entered. Used for trend confirmation validation.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "vwap",
+                    "description": "The Volume Weighted Average Price (VWAP) at the time this trade was entered. Used to validate that the entry price is favorably positioned relative to the daily VWAP.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "validation_reason",
+                    "description": "A human-readable explanation of why the trade passed or failed technical validation. Contains details about EMA alignment, VWAP positioning, and other checks performed.",
+                    "type": "TEXT",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when the paper trade was opened and this record was created.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "closed_at",
+                    "description": "UTC timestamp of when the paper trade position was closed. Null if the trade is still open.",
+                    "type": "TIMESTAMP",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last update to this paper trade record.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [
+                {
+                    "name": "paper_trades_parsed_signal_id_fkey",
+                    "constrained_columns": [
+                        "parsed_signal_id"
+                    ],
+                    "referred_table": "parsed_signals",
+                    "referred_columns": [
+                        "id"
+                    ]
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "ix_paper_trades_parsed_signal_id",
+                    "column_names": [
+                        "parsed_signal_id"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_paper_trades_status",
+                    "column_names": [
+                        "status"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_paper_trades_symbol",
+                    "column_names": [
+                        "symbol"
+                    ],
+                    "unique": false
+                }
+            ]
+        },
+        {
+            "name": "webull_orders",
+            "description": "Tracks live and paper orders submitted to the Webull brokerage API. Each row represents a single order placed through Webull in response to a parsed signal, including order details, status, and the raw API response for debugging.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the Webull order record.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "parsed_signal_id",
+                    "description": "Foreign key referencing parsed_signals.id. Links this Webull order to the specific parsed signal that triggered its placement.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "account_id",
+                    "description": "The Webull account ID against which this order was placed. Identifies the trading account (paper or live).",
+                    "type": "VARCHAR(64)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "client_order_id",
+                    "description": "A unique client-generated order ID used to identify and track this order both internally and with the Webull API. Unique per order.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "symbol",
+                    "description": "The ticker symbol of the instrument ordered (e.g., 'AAPL', 'SPY'). For options, this is the underlying equity symbol.",
+                    "type": "VARCHAR(16)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "instrument_type",
+                    "description": "The type of financial instrument ordered. Possible values: 'STOCK' for equities or 'OPTION' for options contracts.",
+                    "type": "VARCHAR(7)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "option_symbol",
+                    "description": "The full OCC-format options contract symbol (e.g., 'AAPL230616C00150000'). Null for stock orders.",
+                    "type": "VARCHAR(32)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "strike",
+                    "description": "The strike price of the options contract. Null for stock orders.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "expiry",
+                    "description": "The expiration date of the options contract. Null for stock orders.",
+                    "type": "DATE",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "contract_type",
+                    "description": "The type of options contract. Possible values: 'CALL' or 'PUT'. Null for stock orders.",
+                    "type": "VARCHAR(8)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "side",
+                    "description": "The order side. Possible values: 'BUY' to open or add to a position, 'SELL' to close or short a position.",
+                    "type": "VARCHAR(5)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "order_type",
+                    "description": "The type of order submitted to Webull. Possible values: 'LIMIT' (executed only at a specified price or better) or 'MARKET' (executed immediately at the best available price).",
+                    "type": "VARCHAR(6)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "quantity",
+                    "description": "The number of shares or options contracts included in this order.",
+                    "type": "INTEGER",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "limit_price",
+                    "description": "The limit price for limit orders. The order will only fill at this price or better. Null for market orders.",
+                    "type": "DOUBLE PRECISION",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "webull_order_id",
+                    "description": "The order ID returned by the Webull API after submission. Used to query order status and fills. Null if the order was rejected before reaching Webull.",
+                    "type": "VARCHAR(64)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "status",
+                    "description": "Current status of the Webull order. Use the EXACT enum values only. Possible values: 'PENDING' (created locally, not yet sent), 'SUBMITTED' (accepted by Webull), 'FILLED' (fully filled), 'PARTIAL' (partially filled), 'CANCELLED', 'FAILED' (rejected or error). IMPORTANT: Do NOT use 'PARTIALLY_FILLED', 'REJECTED', or any other value — those do not exist and will cause a database error.",
+                    "type": "VARCHAR(9)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "error_message",
+                    "description": "Human-readable error description if the order failed or was rejected. Null on successful submission.",
+                    "type": "TEXT",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "raw_response",
+                    "description": "The raw JSON response body returned by the Webull API. Stored for debugging, reconciliation, and audit purposes.",
+                    "type": "TEXT",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when this order record was created (i.e., when the order was submitted to Webull).",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last status update for this Webull order record.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [
+                {
+                    "name": "webull_orders_parsed_signal_id_fkey",
+                    "constrained_columns": [
+                        "parsed_signal_id"
+                    ],
+                    "referred_table": "parsed_signals",
+                    "referred_columns": [
+                        "id"
+                    ]
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "ix_webull_orders_parsed_signal_id",
+                    "column_names": [
+                        "parsed_signal_id"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_webull_orders_status",
+                    "column_names": [
+                        "status"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "ix_webull_orders_symbol",
+                    "column_names": [
+                        "symbol"
+                    ],
+                    "unique": false
+                },
+                {
+                    "name": "webull_orders_client_order_id_key",
+                    "column_names": [
+                        "client_order_id"
+                    ],
+                    "unique": true
+                }
+            ]
+        },
+        {
+            "name": "roles",
+            "description": "Defines user roles for role-based access control (RBAC). Each row represents a distinct permission level (e.g., 'admin', 'viewer', 'trader'). Users are assigned one role which determines what API endpoints and features they can access.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Auto-incrementing integer primary key for the role.",
+                    "type": "INTEGER",
+                    "nullable": false,
+                    "default": "nextval('\"public\".roles_id_seq'::regclass)"
+                },
+                {
+                    "name": "name",
+                    "description": "The unique name of the role (e.g., 'admin', 'trader', 'viewer'). Used for permission checks throughout the application.",
+                    "type": "VARCHAR(32)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "description",
+                    "description": "A human-readable description of what this role permits. Stored in the roles.description column of the database itself.",
+                    "type": "VARCHAR(255)",
+                    "nullable": true,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when this role was created.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [],
+            "indexes": [
+                {
+                    "name": "roles_name_key",
+                    "column_names": [
+                        "name"
+                    ],
+                    "unique": true
+                }
+            ]
+        },
+        {
+            "name": "users",
+            "description": "Stores registered application users with their authentication credentials and role assignments. Used for JWT-based authentication and role-based access control (RBAC) across the Trade Alert API.",
+            "columns": [
+                {
+                    "name": "id",
+                    "description": "Unique identifier (UUID v4) for the user.",
+                    "type": "VARCHAR(36)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "email",
+                    "description": "The user's email address. Used as the primary login identifier. Must be unique across all users.",
+                    "type": "VARCHAR(255)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "username",
+                    "description": "A unique display name for the user. Used in UI displays and audit logs. Must be unique across all users.",
+                    "type": "VARCHAR(64)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "hashed_password",
+                    "description": "The bcrypt-hashed password for the user. Plain-text passwords are never stored. Used to verify login credentials.",
+                    "type": "VARCHAR(255)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "role_id",
+                    "description": "Foreign key referencing roles.id. Determines the user's permission level within the application.",
+                    "type": "INTEGER",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "is_active",
+                    "description": "Boolean flag indicating whether the user account is active. Inactive users (false) cannot log in or use the API.",
+                    "type": "BOOLEAN",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "created_at",
+                    "description": "UTC timestamp of when the user account was created.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last update to the user's profile or credentials.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "id"
+            ],
+            "foreign_keys": [
+                {
+                    "name": "users_role_id_fkey",
+                    "constrained_columns": [
+                        "role_id"
+                    ],
+                    "referred_table": "roles",
+                    "referred_columns": [
+                        "id"
+                    ]
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "ix_users_email",
+                    "column_names": [
+                        "email"
+                    ],
+                    "unique": true
+                },
+                {
+                    "name": "users_username_key",
+                    "column_names": [
+                        "username"
+                    ],
+                    "unique": true
+                }
+            ]
+        },
+        {
+            "name": "system_config",
+            "description": "A key-value store for dynamic runtime configuration settings. Allows application behavior to be changed at runtime without code deployments (e.g., toggling features, adjusting thresholds). Keys are unique identifiers and values are stored as text, parsed by the application as needed.",
+            "columns": [
+                {
+                    "name": "key",
+                    "description": "The unique configuration key name (e.g., 'EXECUTION_ENABLED', 'DEFAULT_QTY', 'TAKE_PROFIT_PCT'). Acts as the primary key for this table.",
+                    "type": "VARCHAR(64)",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "value",
+                    "description": "The configuration value stored as plain text. The application is responsible for parsing this to the correct type (e.g., boolean, float, integer).",
+                    "type": "TEXT",
+                    "nullable": false,
+                    "default": null
+                },
+                {
+                    "name": "updated_at",
+                    "description": "UTC timestamp of the last time this configuration entry was modified.",
+                    "type": "TIMESTAMP",
+                    "nullable": false,
+                    "default": null
+                }
+            ],
+            "primary_keys": [
+                "key"
+            ],
+            "foreign_keys": [],
+            "indexes": []
+        }
+    ]
+}

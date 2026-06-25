@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { APP_NAME } from '@/lib/brand'
@@ -39,6 +40,12 @@ const navGroups = [
     label: 'ANALYTICS',
     items: [
       { href: '/notifications', label: 'Notifications', icon: Bell },
+    ],
+  },
+  {
+    label: 'AI ASSISTANT',
+    items: [
+      { href: '/chat', label: 'TradeBot', icon: MessageSquare },
     ],
   },
   {

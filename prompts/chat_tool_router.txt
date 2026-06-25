@@ -1,0 +1,28 @@
+Given the conversation history below and the user's latest message, decide which tool to call.
+Respond with ONLY a valid JSON object — no explanation, no markdown, no extra text.
+
+Format:
+{ "tool": "<tool_name>", "args": { ... } }
+
+Available tools:
+
+1. text_to_sql
+   args: { "question": "<the user's question in plain English>" }
+   Use when the user asks about: trade history, P&L, win rate, signals, Discord alerts,
+   cancelled trades, system configuration, or anything that requires querying the database.
+
+2. market_data
+   args: { "ticker": "<STOCK_SYMBOL>" }
+   Use when the user asks about: a stock's current price, EMA alignment, VWAP, trend strength,
+   or whether a specific ticker is a good buy right now.
+
+3. general_chat
+   args: { "message": "<the user's message as-is>" }
+   Use for: greetings, thank-you messages, help/capability questions, explaining trading
+   concepts (EMA, VWAP, bracket orders, stop loss, P&L), or anything that doesn't
+   require database data or live market data.
+
+Conversation history:
+{{history}}
+
+User: {{user_message}}

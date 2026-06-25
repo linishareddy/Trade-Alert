@@ -22,6 +22,7 @@ from routers.v1.ingest import router as ingest_router
 from routers.v1.integrations import router as integrations_router
 from routers.v1.signals import router as signals_router
 from routers.v1.trades import router as trades_router
+from routers.v1.chat import router as chat_router
 from services.v1.auth.dependencies import get_current_user
 
 
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(integrations_router, prefix=prefix, dependencies=protected)
     app.include_router(signals_router,      prefix=prefix, dependencies=protected)
     app.include_router(trades_router,       prefix=prefix, dependencies=protected)
+    app.include_router(chat_router,         prefix=prefix, dependencies=protected)
 
     return app
 

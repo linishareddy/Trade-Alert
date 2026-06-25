@@ -6,8 +6,9 @@ from db.models.paper_trade import PaperTrade
 from db.models.system_config import SystemConfig
 from db.models.role import Role
 from db.models.user import User
+from db.models.chat import ChatSession, ChatMessage
 
 __all__ = [
     "RawAlert", "Signal", "ParsedSignal", "WebullOrder", "PaperTrade",
-    "SystemConfig", "Role", "User",
+    "SystemConfig", "Role", "User", "ChatSession", "ChatMessage",
 ]
