@@ -265,7 +265,7 @@ export default function ChatPage() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{user.username}</p>
-              <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">TradeBot User</p>
+              <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">SentinelAI User</p>
             </div>
           </div>
         </div>
@@ -410,7 +410,7 @@ export default function ChatPage() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message TradeBot..."
+                placeholder="Message SentinelAI..."
                 disabled={sendMutation.isPending}
                 className="w-full resize-none bg-transparent py-4 pl-4 pr-12 text-sm text-zinc-900 placeholder:text-zinc-500 focus:outline-none disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-400"
                 rows={1}
@@ -425,7 +425,7 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
-              TradeBot can make mistakes. Verify important information.
+              SentinelAI can make mistakes. Verify important information.
             </p>
           </div>
         </div>

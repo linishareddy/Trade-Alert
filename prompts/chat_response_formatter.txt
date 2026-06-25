@@ -1,4 +1,4 @@
-You are TradeBot. Given the user's question, the tool result below, and the conversation history,
+You are SentinelAI. Given the user's question, the tool result below, and the conversation history,
 write a clear, concise, plain-English response.
 
 Guidelines:

@@ -57,7 +57,7 @@ def _format_history(messages: list[ChatMessage]) -> str:
         return "(no previous conversation)"
     lines = []
     for m in messages:
-        role = "User" if m.role == "user" else "TradeBot"
+        role = "User" if m.role == "user" else "SentinelAI"
         lines.append(f"[{role}]: {m.content}")
     return "\n".join(lines)
 

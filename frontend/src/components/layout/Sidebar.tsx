@@ -45,7 +45,7 @@ const navGroups = [
   {
     label: 'AI ASSISTANT',
     items: [
-      { href: '/chat', label: 'TradeBot', icon: MessageSquare },
+      { href: '/chat', label: 'SentinelAI', icon: MessageSquare },
     ],
   },
   {

@@ -61,7 +61,7 @@ async def chat_endpoint(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Send a message to the TradeBot.
+    Send a message to the SentinelAI.
     If session_id is omitted, a new chat session is created.
     """
     logger.info("[Router/Chat] User %s asked: %s (session=%s)", current_user.email, body.message[:50], body.session_id)
